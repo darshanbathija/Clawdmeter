@@ -70,30 +70,59 @@ struct PopoverView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("Usage")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(primaryText)
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Text("Usage")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(primaryText)
+                Spacer()
+                ThemePill(themeRaw: $themeRaw, scheme: effectiveScheme)
+            }
 
             Button(action: {
                 NotificationCenter.default.post(
                     name: AppDelegate.showDashboardNotification, object: nil
                 )
             }) {
-                Image(systemName: "macwindow")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(secondaryText)
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Open dashboard")
+                        .font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(secondaryText)
+                }
+                .foregroundStyle(primaryText)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 10).fill(dashboardButtonFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(dashboardButtonBorder, lineWidth: 0.5)
+                )
             }
             .buttonStyle(.plain)
-            .help("Show dashboard")
-            .accessibilityLabel("Show dashboard window")
-
-            Spacer()
-
-            ThemePill(themeRaw: $themeRaw, scheme: effectiveScheme)
+            .help("Open the Clawdmeter dashboard window")
+            .accessibilityLabel("Open dashboard")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private var dashboardButtonFill: Color {
+        effectiveScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color.white
+    }
+    private var dashboardButtonBorder: Color {
+        effectiveScheme == .dark
+            ? Color.white.opacity(0.12)
+            : Color.black.opacity(0.10)
     }
 
     // MARK: - Footer ("Last updated" + refresh)

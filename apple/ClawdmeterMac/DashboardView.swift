@@ -35,7 +35,7 @@ struct DashboardView: View {
 
             menuBarTogglesRow
         }
-        .frame(minWidth: 720, minHeight: 520)
+        .frame(minWidth: 820, minHeight: 580)
         .background(backgroundColor)
         .preferredColorScheme(theme.colorScheme)
     }
@@ -111,11 +111,30 @@ struct DashboardView: View {
     }
 }
 
-// MARK: - One provider's column (gauge + countdowns)
+// MARK: - One provider's column (gauge + countdowns + advanced)
 
 private struct ProviderColumn: View {
     @ObservedObject var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Auto-revive preference is namespaced per provider so Claude and Codex
+    /// each remember their own toggle independently.
+    @AppStorage private var autoReviveEnabled: Bool
+    /// Advanced section collapse state, also per-provider so each column
+    /// remembers independently.
+    @AppStorage private var advancedExpanded: Bool
+
+    init(model: AppModel) {
+        self._model = ObservedObject(initialValue: model)
+        self._autoReviveEnabled = AppStorage(
+            wrappedValue: false,
+            "\(model.config.storageKeyPrefix).autoRevive"
+        )
+        self._advancedExpanded = AppStorage(
+            wrappedValue: false,
+            "\(model.config.storageKeyPrefix).advancedExpanded"
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -196,6 +215,13 @@ private struct ProviderColumn: View {
 
             Divider().background(dividerColor)
 
+            // Advanced — auto-revive controls. Always expanded in the
+            // dashboard (the popover collapses it to keep the menu bar
+            // surface compact; here we have the room).
+            advancedSection
+
+            Divider().background(dividerColor)
+
             // Last updated + refresh
             HStack {
                 if let updatedAt = model.usage?.updatedAt {
@@ -227,6 +253,116 @@ private struct ProviderColumn: View {
         }
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: autoReviveEnabled) { _, newValue in
+            model.setAutoReviveEnabled(newValue)
+        }
+        .onAppear {
+            // Mirror persisted state into the model on first appear so the
+            // background AutoReviver tick respects the saved toggle.
+            model.setAutoReviveEnabled(autoReviveEnabled)
+        }
+    }
+
+    // MARK: - Advanced section
+
+    @ViewBuilder
+    private var advancedSection: some View {
+        // Codex's auto-revive isn't implemented (ChatGPT backend uses SSE
+        // streaming, not a one-shot completion call). Disable the toggle
+        // and explain inline.
+        let autoReviveSupported = (model.config.id == "claude")
+
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: { withAnimation(.snappy) { advancedExpanded.toggle() } }) {
+                HStack(spacing: 6) {
+                    Image(systemName: advancedExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(secondaryText)
+                    Text("Advanced")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(primaryText)
+                    Spacer()
+                }
+                .contentShape(Rectangle())  // make the whole row clickable, not just the text
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(advancedExpanded ? "Collapse advanced" : "Expand advanced")
+
+            if advancedExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    Toggle(isOn: $autoReviveEnabled) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Keep 5h timer ticking")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(autoReviveSupported ? primaryText : secondaryText)
+                            if autoReviveSupported {
+                                Text("When the 5-hour window ends, send a 1-token 'Hi' to \(reviveModelDisplayName) so a new window starts immediately.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text("Not yet supported for Codex — the ChatGPT backend needs a streaming protocol we haven't wired up.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(!autoReviveSupported)
+
+                    if autoReviveSupported {
+                        HStack(spacing: 8) {
+                            autoReviveStatusView
+                                .font(.system(size: 11))
+                                .foregroundStyle(secondaryText)
+                                .monospacedDigit()
+                            Spacer()
+                            Button("Revive now") { model.reviveNow() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(!autoReviveEnabled)
+                        }
+                    }
+                }
+                .padding(.leading, 18)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var autoReviveStatusView: some View {
+        if !autoReviveEnabled {
+            Text("Off — toggle on to keep the 5h window perpetual.")
+        } else if let last = model.autoReviver.lastResult {
+            switch last.outcome {
+            case .fired:
+                Text("Last revived ")
+                    + Text(last.at, style: .relative)
+                    + Text(" ago · \(model.autoReviver.fireCount) total")
+            case .throttled:
+                Text("Throttled ") + Text(last.at, style: .relative) + Text(" ago")
+            case .noToken:
+                Text("Skipped (no token) ") + Text(last.at, style: .relative) + Text(" ago")
+            case .httpError(let code):
+                Text("API error \(code) ") + Text(last.at, style: .relative) + Text(" ago")
+            case .networkError:
+                Text("Network error ") + Text(last.at, style: .relative) + Text(" ago")
+            case .disabled:
+                Text("Disabled")
+            }
+        } else {
+            Text("Armed. Will fire when the next 5h window ends.")
+        }
+    }
+
+    private var reviveModelDisplayName: String {
+        // Mirror PopoverView's pretty-print so the two surfaces stay in sync.
+        let m = model.config.reviveModel
+        if m.contains("haiku") { return "Claude Haiku 4.5" }
+        if m.contains("gpt") { return "GPT 5.5 mini" }
+        return m
     }
 
     // MARK: - Helpers

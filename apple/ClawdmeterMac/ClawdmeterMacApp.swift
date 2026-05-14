@@ -52,7 +52,7 @@ struct ClawdmeterMacApp: App {
                 NSApp.setActivationPolicy(.regular)
             }
         }
-        .defaultSize(width: 760, height: 480)
+        .defaultSize(width: 860, height: 600)
         .windowResizability(.contentMinSize)
 
         Settings {
