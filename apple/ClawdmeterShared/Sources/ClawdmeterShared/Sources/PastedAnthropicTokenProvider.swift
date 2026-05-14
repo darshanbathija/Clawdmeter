@@ -136,14 +136,14 @@ public final class PastedAnthropicTokenProvider: TokenProvider, @unchecked Senda
         let updateStatus = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
         if updateStatus == errSecSuccess { return true }
         if updateStatus != errSecItemNotFound {
-            logger.error("PastedAnthropicTokenProvider update failed: \(updateStatus)")
+            logger.error("PastedAnthropicTokenProvider update failed: \(updateStatus, privacy: .public) group=\(self.accessGroup ?? "nil", privacy: .public) sync=\(self.synchronizable, privacy: .public)")
         }
         // Doesn't exist yet — add a fresh entry.
         var addQuery = query
         addQuery[kSecValueData as String] = data
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
         if addStatus != errSecSuccess {
-            logger.error("PastedAnthropicTokenProvider add failed: \(addStatus)")
+            logger.error("PastedAnthropicTokenProvider add failed: \(addStatus, privacy: .public) group=\(self.accessGroup ?? "nil", privacy: .public) sync=\(self.synchronizable, privacy: .public)")
             return false
         }
         return true

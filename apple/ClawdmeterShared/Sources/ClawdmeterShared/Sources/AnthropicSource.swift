@@ -56,7 +56,14 @@ public final class AnthropicSource: AISource, @unchecked Sendable {
             logger.warning("AnthropicSource.poll: no token")
             throw AISourceError.unauthenticated
         }
-        logger.info("AnthropicSource.poll: token len=\(token.count), making HTTPS")
+        // Fingerprint = first 14 chars (the well-known `sk-ant-oat01-` prefix
+        // plus the next char) + last 4. Safe to log because that's not enough
+        // to reconstruct the token, but enough to confirm Mac and iOS are
+        // sending the same string.
+        let fp = token.count > 18
+            ? "\(token.prefix(14))…\(token.suffix(4))"
+            : "(short:\(token.count))"
+        logger.info("AnthropicSource.poll: token len=\(token.count) fp=\(fp, privacy: .public), making HTTPS")
         defer { logger.info("AnthropicSource.poll: HTTPS leg done") }
 
         var request = URLRequest(url: endpoint)

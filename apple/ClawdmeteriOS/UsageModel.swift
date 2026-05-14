@@ -35,28 +35,63 @@ public final class UsageModel: ObservableObject {
         // Falls through to manual paste if the user hasn't run the Mac app
         // or doesn't have iCloud Keychain.
         self.tokenProvider = PastedAnthropicTokenProvider.shared()
+        // Auto-clear bogus stored tokens (e.g. garbage left over from a
+        // failed paste before we hardened the extraction code). Real Claude
+        // Code OAuth tokens always start with `sk-ant-oat01-` and are
+        // ~108 chars; if what we read is wildly off, drop it so the UI
+        // returns the user to a clean state.
+        if let stored = tokenProvider.currentAccessToken,
+           !Self.looksLikeValidToken(stored) {
+            logger.warning("Discarding malformed stored token (len=\(stored.count, privacy: .public))")
+            tokenProvider.clear()
+        }
+        let initialToken = tokenProvider.currentAccessToken
+        logger.info("UsageModel init: hasToken=\(initialToken != nil, privacy: .public) len=\(initialToken?.count ?? 0, privacy: .public)")
         configurePollerIfTokenPresent()
         observeAppLifecycle()
     }
 
-    /// Set/replace the Anthropic token. Tearing down + rebuilding the poller
-    /// is fine — it's cheap and lets us pick up a fresh URLSession.
-    public func setToken(_ raw: String) {
-        let ok = tokenProvider.setToken(raw)
-        logger.info("setToken: ok=\(ok, privacy: .public) hasToken=\(self.tokenProvider.hasToken, privacy: .public)")
-        if !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            configurePollerIfTokenPresent()
-            forcePoll()
-        } else {
-            // Sign-out: tear down poller, drop usage so UI returns to the
-            // "paste token" state.
+    /// Sanity-check on what we're about to save / what we just read. Tokens
+    /// look like `sk-ant-oat01-<102 random chars>` ≈ 108 chars total, with
+    /// some wiggle room for future Anthropic format changes.
+    private static func looksLikeValidToken(_ token: String) -> Bool {
+        token.hasPrefix("sk-ant-") && token.count <= 200 && !token.contains("\n")
+    }
+
+    /// Set/replace the Anthropic token. Accepts a bare `sk-ant-oat01-…`
+    /// token, the full JSON blob Claude Code stores
+    /// (`{"claudeAiOauth":{"accessToken":"…","…"}}`), or an empty string to
+    /// clear. Returns `true` if accepted, `false` if extraction couldn't
+    /// find something that looks like a Claude OAuth token — the UI
+    /// surfaces the error rather than pretending the paste worked.
+    @discardableResult
+    public func setToken(_ raw: String) -> Bool {
+        let extracted = Self.extractAccessToken(from: raw)
+        let fp = extracted.count > 18
+            ? "\(extracted.prefix(14))…\(extracted.suffix(4))"
+            : "(short:\(extracted.count))"
+        logger.info("setToken: raw len=\(raw.count, privacy: .public) extracted len=\(extracted.count, privacy: .public) fp=\(fp, privacy: .public)")
+        let trimmed = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            tokenProvider.clear()
             poller?.stop()
             poller = nil
             usage = nil
             lastError = nil
             needsReauth = false
             isPolling = false
+            return true
         }
+        guard Self.looksLikeValidToken(trimmed) else {
+            logger.warning("setToken: extracted value doesn't look like a Claude OAuth token (len=\(trimmed.count, privacy: .public)); refusing to save")
+            return false
+        }
+        let ok = tokenProvider.setToken(trimmed)
+        logger.info("setToken: write ok=\(ok, privacy: .public) hasToken=\(self.tokenProvider.hasToken, privacy: .public)")
+        guard ok else { return false }
+        configurePollerIfTokenPresent()
+        forcePoll()
+        return true
     }
 
     /// One-shot poll, ignoring cadence. Used by pull-to-refresh and after
@@ -64,6 +99,42 @@ public final class UsageModel: ObservableObject {
     public func forcePoll() {
         guard let poller else { return }
         Task { _ = await poller.forcePoll() }
+    }
+
+    /// Pull a bare `sk-ant-…` token out of whatever the user pasted. Handles
+    /// the three shapes we see in the wild:
+    ///   1. Bare token: `"sk-ant-oat01-…"`
+    ///   2. Claude Code's Keychain JSON: `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-…", …}}`
+    ///   3. A bigger object with the same shape nested somewhere.
+    /// Falls through to the trimmed input if nothing matches, so a fresh
+    /// token-format from Anthropic won't immediately break the flow.
+    private static func extractAccessToken(from raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("sk-ant-") { return trimmed }
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let token = findAccessToken(in: obj) {
+            return token
+        }
+        return trimmed
+    }
+
+    private static func findAccessToken(in obj: Any) -> String? {
+        if let s = obj as? String, s.hasPrefix("sk-ant-") { return s }
+        if let dict = obj as? [String: Any] {
+            if let s = dict["accessToken"] as? String, s.hasPrefix("sk-ant-") {
+                return s
+            }
+            for value in dict.values {
+                if let nested = findAccessToken(in: value) { return nested }
+            }
+        }
+        if let arr = obj as? [Any] {
+            for value in arr {
+                if let nested = findAccessToken(in: value) { return nested }
+            }
+        }
+        return nil
     }
 
     // MARK: - Private
