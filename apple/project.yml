@@ -116,6 +116,34 @@ targets:
         SKIP_INSTALL: YES
 
   # ───────────────────────────────────────────────────────────────
+  # watchOS app — Plan D6: wrist-side gauge. iCloud-Keychain-synced
+  # token from the Mac/iPhone means zero setup on the Watch.
+  # (Pin Desk Mode + complications come in subsequent passes.)
+  # ───────────────────────────────────────────────────────────────
+  ClawdmeterWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: ClawdmeterWatch
+        excludes:
+          - "Info.plist"
+          - "ClawdmeterWatch.entitlements"
+    dependencies:
+      - package: ClawdmeterShared
+        product: ClawdmeterShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clawdmeter.watch
+        PRODUCT_NAME: Clawdmeter
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "76S62SDSD3"
+        INFOPLIST_FILE: ClawdmeterWatch/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClawdmeterWatch/ClawdmeterWatch.entitlements
+        WATCHOS_DEPLOYMENT_TARGET: "10.0"
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: NO
+
+  # ───────────────────────────────────────────────────────────────
   # Mac widget extension — surfaces Claude/Codex gauges on the Desktop,
   # Notification Center, and Stage Manager. Reads the App Group cache
   # that `ClawdmeterMac` writes on every poll (see UsageStore).
@@ -163,6 +191,13 @@ schemes:
       targets:
         ClawdmeteriOS: all
         ClawdmeteriOSWidgets: all
+    run:
+      config: Debug
+
+  Clawdmeter (Watch):
+    build:
+      targets:
+        ClawdmeterWatch: all
     run:
       config: Debug
     archive:

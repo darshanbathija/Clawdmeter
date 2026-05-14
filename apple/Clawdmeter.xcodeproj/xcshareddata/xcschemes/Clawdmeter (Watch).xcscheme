@@ -15,23 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0AB15308E885A033A5C14292"
-               BuildableName = "ClawdmeteriOS.app"
-               BlueprintName = "ClawdmeteriOS"
-               ReferencedContainer = "container:Clawdmeter.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8AA22310FEA881C9D8B28CB5"
-               BuildableName = "ClawdmeteriOSWidgets.appex"
-               BlueprintName = "ClawdmeteriOSWidgets"
+               BlueprintIdentifier = "F684FD2D7539FBD6583E7C23"
+               BuildableName = "ClawdmeterWatch.app"
+               BlueprintName = "ClawdmeterWatch"
                ReferencedContainer = "container:Clawdmeter.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "0AB15308E885A033A5C14292"
-            BuildableName = "ClawdmeteriOS.app"
-            BlueprintName = "ClawdmeteriOS"
+            BlueprintIdentifier = "F684FD2D7539FBD6583E7C23"
+            BuildableName = "ClawdmeterWatch.app"
+            BlueprintName = "ClawdmeterWatch"
             ReferencedContainer = "container:Clawdmeter.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -69,9 +55,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "0AB15308E885A033A5C14292"
-            BuildableName = "ClawdmeteriOS.app"
-            BlueprintName = "ClawdmeteriOS"
+            BlueprintIdentifier = "F684FD2D7539FBD6583E7C23"
+            BuildableName = "ClawdmeterWatch.app"
+            BlueprintName = "ClawdmeterWatch"
             ReferencedContainer = "container:Clawdmeter.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -88,12 +74,14 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "0AB15308E885A033A5C14292"
-            BuildableName = "ClawdmeteriOS.app"
-            BlueprintName = "ClawdmeteriOS"
+            BlueprintIdentifier = "F684FD2D7539FBD6583E7C23"
+            BuildableName = "ClawdmeterWatch.app"
+            BlueprintName = "ClawdmeterWatch"
             ReferencedContainer = "container:Clawdmeter.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

@@ -31,9 +31,7 @@
 		<key>smart-alarm</key>
 		<string>Keep the Clawdmeter dashboard visible while the watch rests on a desk.</string>
 	</dict>
-	<key>WKRunsIndependentlyOfCompanionApp</key>
-	<false/>
 	<key>WKWatchOnly</key>
-	<false/>
+	<true/>
 </dict>
 </plist>
