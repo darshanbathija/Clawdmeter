@@ -1,0 +1,576 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03A84A49FEA03B5FE83AAB9D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7EDE305AE4E9350183F0920 /* AppDelegate.swift */; };
+		1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */; };
+		1CF7ABBB2B878047BE44F411 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0273529FD22962799981CE40 /* DashboardView.swift */; };
+		2B79007559B228E26E08A837 /* AutoReviver.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDD3A71BAF271B6BEB287DE2 /* AutoReviver.swift */; };
+		358CD1C23BCFA5602E805A41 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E414059E5EEBAE58913412B /* AppTheme.swift */; };
+		3C1B58E34AA8D8FC4831DBAF /* ClawdmeterMacWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */; };
+		40D596319B0D0203AE7F1B84 /* ClawdmeterMacWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 07E588070BA9CBA723BA60EC /* ClawdmeterMacWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4A027F14FB57C10128699164 /* ClaudeLogo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 989678078117646A9327BB0B /* ClaudeLogo.svg */; };
+		5432E5C01B962FF077E05110 /* ProviderConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7744A52822D779D5A3A61FD /* ProviderConfig.swift */; };
+		5473F8C335F80F264D922703 /* ClawdmeterShared in Frameworks */ = {isa = PBXBuildFile; productRef = 793208666036735B121CD318 /* ClawdmeterShared */; };
+		75338A54670234E6728EACB9 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8B7786D0757B0411303F79 /* AppModel.swift */; };
+		7886C417E861C566EE86D686 /* PopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1362703230C869345B8AF6F7 /* PopoverView.swift */; };
+		91F59FC843FCFADA8995B62C /* AppRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC65FE99FD75CA3B6A74A83 /* AppRuntime.swift */; };
+		B91953253B345054E392D6FC /* CodexLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = 6C40566A9CD019426F02502C /* CodexLogo.png */; };
+		C5201CFD2F7B612392EB3A17 /* ClaudeLogo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 2C335B8CD4CB81A48217F617 /* ClaudeLogo.svg */; };
+		C97F41751616AF2672BAA590 /* CodexLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = 41B60D6E8F440791CA97B015 /* CodexLogo.png */; };
+		D64E0EA5E4866E7E56001DE4 /* MenuBarGaugeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1C225091C6434AB97D2E8 /* MenuBarGaugeView.swift */; };
+		D89B4592E0A3C71E668ED91F /* UsageQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E844E6256A865A0DFEEF18 /* UsageQueryService.swift */; };
+		E12B14B2458C468678246859 /* ClawdmeterShared in Frameworks */ = {isa = PBXBuildFile; productRef = E5841B9F5A902887629FD6BF /* ClawdmeterShared */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AB19613FB5BA226F6474527B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 222D0246BE012011ADC176EC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9891BEAF13ED7FA627485A18;
+			remoteInfo = ClawdmeterMacWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1344A0E4356390502114BE78 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				40D596319B0D0203AE7F1B84 /* ClawdmeterMacWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0273529FD22962799981CE40 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		063A99FE19DBEB6CBE38A400 /* ClawdmeterMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClawdmeterMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		07E588070BA9CBA723BA60EC /* ClawdmeterMacWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClawdmeterMacWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1362703230C869345B8AF6F7 /* PopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverView.swift; sourceTree = "<group>"; };
+		1C8B7786D0757B0411303F79 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		24E844E6256A865A0DFEEF18 /* UsageQueryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageQueryService.swift; sourceTree = "<group>"; };
+		2C335B8CD4CB81A48217F617 /* ClaudeLogo.svg */ = {isa = PBXFileReference; path = ClaudeLogo.svg; sourceTree = "<group>"; };
+		41B60D6E8F440791CA97B015 /* CodexLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CodexLogo.png; sourceTree = "<group>"; };
+		44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdmeterMacApp.swift; sourceTree = "<group>"; };
+		5CC65FE99FD75CA3B6A74A83 /* AppRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntime.swift; sourceTree = "<group>"; };
+		6C40566A9CD019426F02502C /* CodexLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CodexLogo.png; sourceTree = "<group>"; };
+		748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdmeterMacWidgets.swift; sourceTree = "<group>"; };
+		8E414059E5EEBAE58913412B /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		989678078117646A9327BB0B /* ClaudeLogo.svg */ = {isa = PBXFileReference; path = ClaudeLogo.svg; sourceTree = "<group>"; };
+		A7EDE305AE4E9350183F0920 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		EB8FAB3F3BA70A5A17C2DD97 /* ClawdmeterShared */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ClawdmeterShared; path = ClawdmeterShared; sourceTree = SOURCE_ROOT; };
+		EDD3A71BAF271B6BEB287DE2 /* AutoReviver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoReviver.swift; sourceTree = "<group>"; };
+		F7744A52822D779D5A3A61FD /* ProviderConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderConfig.swift; sourceTree = "<group>"; };
+		FEA1C225091C6434AB97D2E8 /* MenuBarGaugeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarGaugeView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		323EF2DE972CB6604CEC6397 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E12B14B2458C468678246859 /* ClawdmeterShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		349406630A509848EE27C4B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5473F8C335F80F264D922703 /* ClawdmeterShared in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		472FCE6739E3CBFA1F0B7D11 /* ClawdmeterMac */ = {
+			isa = PBXGroup;
+			children = (
+				A7EDE305AE4E9350183F0920 /* AppDelegate.swift */,
+				1C8B7786D0757B0411303F79 /* AppModel.swift */,
+				5CC65FE99FD75CA3B6A74A83 /* AppRuntime.swift */,
+				8E414059E5EEBAE58913412B /* AppTheme.swift */,
+				EDD3A71BAF271B6BEB287DE2 /* AutoReviver.swift */,
+				44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */,
+				0273529FD22962799981CE40 /* DashboardView.swift */,
+				FEA1C225091C6434AB97D2E8 /* MenuBarGaugeView.swift */,
+				1362703230C869345B8AF6F7 /* PopoverView.swift */,
+				F7744A52822D779D5A3A61FD /* ProviderConfig.swift */,
+				24E844E6256A865A0DFEEF18 /* UsageQueryService.swift */,
+				D7EBFDEEE4BD194480C9A261 /* Resources */,
+			);
+			path = ClawdmeterMac;
+			sourceTree = "<group>";
+		};
+		545B0518B5EA26E2242B825F /* ClawdmeterMacWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */,
+				FE54789A40285BD3DFE4CF99 /* Resources */,
+			);
+			path = ClawdmeterMacWidgets;
+			sourceTree = "<group>";
+		};
+		8355AE2A6C5D497C97998BEB = {
+			isa = PBXGroup;
+			children = (
+				472FCE6739E3CBFA1F0B7D11 /* ClawdmeterMac */,
+				545B0518B5EA26E2242B825F /* ClawdmeterMacWidgets */,
+				ED156242FB8C5A01DE4F8ED7 /* Packages */,
+				D520BCF1F836E478A167B219 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D520BCF1F836E478A167B219 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				063A99FE19DBEB6CBE38A400 /* ClawdmeterMac.app */,
+				07E588070BA9CBA723BA60EC /* ClawdmeterMacWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D7EBFDEEE4BD194480C9A261 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				989678078117646A9327BB0B /* ClaudeLogo.svg */,
+				41B60D6E8F440791CA97B015 /* CodexLogo.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		ED156242FB8C5A01DE4F8ED7 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				EB8FAB3F3BA70A5A17C2DD97 /* ClawdmeterShared */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		FE54789A40285BD3DFE4CF99 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				2C335B8CD4CB81A48217F617 /* ClaudeLogo.svg */,
+				6C40566A9CD019426F02502C /* CodexLogo.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9891BEAF13ED7FA627485A18 /* ClawdmeterMacWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 476F0FCB3A136981D20A12CF /* Build configuration list for PBXNativeTarget "ClawdmeterMacWidgets" */;
+			buildPhases = (
+				A9E11FF43A12CC7FA22B6BB3 /* Sources */,
+				644B436EB98A07FEE43C0B8C /* Resources */,
+				323EF2DE972CB6604CEC6397 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ClawdmeterMacWidgets;
+			packageProductDependencies = (
+				E5841B9F5A902887629FD6BF /* ClawdmeterShared */,
+			);
+			productName = ClawdmeterMacWidgets;
+			productReference = 07E588070BA9CBA723BA60EC /* ClawdmeterMacWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E01F1244232B993269EA8B04 /* ClawdmeterMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2D3E2AF62F9B6A0F3D439ED6 /* Build configuration list for PBXNativeTarget "ClawdmeterMac" */;
+			buildPhases = (
+				2F4AE07AD7834EDEEC7B2479 /* Sources */,
+				690B143B6DBBCC6BB24A0180 /* Resources */,
+				349406630A509848EE27C4B5 /* Frameworks */,
+				1344A0E4356390502114BE78 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D63DE8D211614010E225503B /* PBXTargetDependency */,
+			);
+			name = ClawdmeterMac;
+			packageProductDependencies = (
+				793208666036735B121CD318 /* ClawdmeterShared */,
+			);
+			productName = ClawdmeterMac;
+			productReference = 063A99FE19DBEB6CBE38A400 /* ClawdmeterMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		222D0246BE012011ADC176EC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					9891BEAF13ED7FA627485A18 = {
+						DevelopmentTeam = 76S62SDSD3;
+						ProvisioningStyle = Automatic;
+					};
+					E01F1244232B993269EA8B04 = {
+						DevelopmentTeam = 76S62SDSD3;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = E160223015188D5586047E37 /* Build configuration list for PBXProject "Clawdmeter" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8355AE2A6C5D497C97998BEB;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FD128F39121EA338B1462B1B /* XCLocalSwiftPackageReference "ClawdmeterShared" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D520BCF1F836E478A167B219 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E01F1244232B993269EA8B04 /* ClawdmeterMac */,
+				9891BEAF13ED7FA627485A18 /* ClawdmeterMacWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		644B436EB98A07FEE43C0B8C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5201CFD2F7B612392EB3A17 /* ClaudeLogo.svg in Resources */,
+				B91953253B345054E392D6FC /* CodexLogo.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		690B143B6DBBCC6BB24A0180 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4A027F14FB57C10128699164 /* ClaudeLogo.svg in Resources */,
+				C97F41751616AF2672BAA590 /* CodexLogo.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2F4AE07AD7834EDEEC7B2479 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				03A84A49FEA03B5FE83AAB9D /* AppDelegate.swift in Sources */,
+				75338A54670234E6728EACB9 /* AppModel.swift in Sources */,
+				91F59FC843FCFADA8995B62C /* AppRuntime.swift in Sources */,
+				358CD1C23BCFA5602E805A41 /* AppTheme.swift in Sources */,
+				2B79007559B228E26E08A837 /* AutoReviver.swift in Sources */,
+				1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */,
+				1CF7ABBB2B878047BE44F411 /* DashboardView.swift in Sources */,
+				D64E0EA5E4866E7E56001DE4 /* MenuBarGaugeView.swift in Sources */,
+				7886C417E861C566EE86D686 /* PopoverView.swift in Sources */,
+				5432E5C01B962FF077E05110 /* ProviderConfig.swift in Sources */,
+				D89B4592E0A3C71E668ED91F /* UsageQueryService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A9E11FF43A12CC7FA22B6BB3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3C1B58E34AA8D8FC4831DBAF /* ClawdmeterMacWidgets.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D63DE8D211614010E225503B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9891BEAF13ED7FA627485A18 /* ClawdmeterMacWidgets */;
+			targetProxy = AB19613FB5BA226F6474527B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		01E608FB3459963A26C0EB95 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		0409D32AD73382DB7B3127F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ClawdmeterMac/ClawdmeterMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 76S62SDSD3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClawdmeterMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clawdmeter.mac;
+				PRODUCT_NAME = Clawdmeter;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		542FF7A3ACBDDC6B1ED6EBA2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClawdmeterMacWidgets/ClawdmeterMacWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 76S62SDSD3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClawdmeterMacWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clawdmeter.mac.widgets;
+				PRODUCT_NAME = ClawdmeterMacWidgets;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		64087DC87224A7EA46A7C163 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ClawdmeterMac/ClawdmeterMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 76S62SDSD3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClawdmeterMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clawdmeter.mac;
+				PRODUCT_NAME = Clawdmeter;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		85F66FEE338AA7BE0FEA573D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ClawdmeterMacWidgets/ClawdmeterMacWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 76S62SDSD3;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ClawdmeterMacWidgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clawdmeter.mac.widgets;
+				PRODUCT_NAME = ClawdmeterMacWidgets;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		B165F7A2C4704151E7295A4C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2D3E2AF62F9B6A0F3D439ED6 /* Build configuration list for PBXNativeTarget "ClawdmeterMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				64087DC87224A7EA46A7C163 /* Debug */,
+				0409D32AD73382DB7B3127F1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		476F0FCB3A136981D20A12CF /* Build configuration list for PBXNativeTarget "ClawdmeterMacWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				542FF7A3ACBDDC6B1ED6EBA2 /* Debug */,
+				85F66FEE338AA7BE0FEA573D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E160223015188D5586047E37 /* Build configuration list for PBXProject "Clawdmeter" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				01E608FB3459963A26C0EB95 /* Debug */,
+				B165F7A2C4704151E7295A4C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		FD128F39121EA338B1462B1B /* XCLocalSwiftPackageReference "ClawdmeterShared" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ClawdmeterShared;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		793208666036735B121CD318 /* ClawdmeterShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ClawdmeterShared;
+		};
+		E5841B9F5A902887629FD6BF /* ClawdmeterShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ClawdmeterShared;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 222D0246BE012011ADC176EC /* Project object */;
+}

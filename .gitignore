@@ -11,3 +11,10 @@ firmware/.vscode/
 # Node tooling deps (npm install --no-save)
 tools/node_modules/
 tools/package-lock.json
+
+# Apple — Xcode and xcodegen
+apple/Clawdmeter.xcodeproj/xcuserdata/
+apple/Clawdmeter.xcodeproj/project.xcworkspace/xcuserdata/
+apple/**/.build/
+apple/**/DerivedData/
+apple/**/*.xcuserstate
