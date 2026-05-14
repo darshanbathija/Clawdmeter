@@ -21,6 +21,20 @@
                ReferencedContainer = "container:Clawdmeter.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8AA22310FEA881C9D8B28CB5"
+               BuildableName = "ClawdmeteriOSWidgets.appex"
+               BlueprintName = "ClawdmeteriOSWidgets"
+               ReferencedContainer = "container:Clawdmeter.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

@@ -71,6 +71,8 @@ targets:
     dependencies:
       - package: ClawdmeterShared
         product: ClawdmeterShared
+      - target: ClawdmeteriOSWidgets
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.clawdmeter.ios
@@ -83,6 +85,35 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_PREVIEWS: YES
+
+  # ───────────────────────────────────────────────────────────────
+  # iPhone widget extension — Lock Screen, StandBy, and Home Screen
+  # widgets. Reads UsageStore directly (iOS App Groups Just Work,
+  # unlike on macOS where we needed XPC).
+  # ───────────────────────────────────────────────────────────────
+  ClawdmeteriOSWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ClawdmeteriOSWidgets
+        excludes:
+          - "Info.plist"
+          - "ClawdmeteriOSWidgets.entitlements"
+    dependencies:
+      - package: ClawdmeterShared
+        product: ClawdmeterShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clawdmeter.ios.widgets
+        PRODUCT_NAME: ClawdmeteriOSWidgets
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "76S62SDSD3"
+        INFOPLIST_FILE: ClawdmeteriOSWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ClawdmeteriOSWidgets/ClawdmeteriOSWidgets.entitlements
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
 
   # ───────────────────────────────────────────────────────────────
   # Mac widget extension — surfaces Claude/Codex gauges on the Desktop,
@@ -131,6 +162,7 @@ schemes:
     build:
       targets:
         ClawdmeteriOS: all
+        ClawdmeteriOSWidgets: all
     run:
       config: Debug
     archive:
