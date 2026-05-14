@@ -56,4 +56,9 @@ public typealias RepoKey = String
 
 extension RepoKey {
     public static let unknown: RepoKey = "(unknown)"
+    /// Bucket for cwds that don't resolve to a git repository — random
+    /// UUIDs, home-directory sessions, ad-hoc folders. Surfaced as a
+    /// single "Other" row in the by-repo list so the UI isn't polluted
+    /// with workspace IDs and ambient directories that aren't real repos.
+    public static let other: RepoKey = "(other)"
 }

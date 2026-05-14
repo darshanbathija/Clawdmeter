@@ -15,7 +15,9 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(record?.provider, .claude)
         XCTAssertEqual(record?.tokens.inputTokens, 100)
         XCTAssertEqual(record?.tokens.outputTokens, 50)
-        XCTAssertEqual(record?.repo, "/Users/x/foo")
+        // `/Users/x/foo` doesn't exist on disk, so canonical resolution
+        // can't find a `.git` and buckets it under `.other`.
+        XCTAssertEqual(record?.repo, RepoKey.other)
         XCTAssertEqual(record?.dedupKey, "msg_1:req_1")
     }
 
@@ -63,7 +65,8 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(records[0].tokens.inputTokens, 1000)
         XCTAssertEqual(records[0].tokens.outputTokens, 500)
         XCTAssertEqual(records[0].tokens.cacheReadTokens, 0)
-        XCTAssertEqual(records[0].repo, cwd)
+        // Synthetic path with no .git on disk → bucketed under `.other`.
+        XCTAssertEqual(records[0].repo, RepoKey.other)
         XCTAssertEqual(records[0].model, "gpt-5-codex")
 
         // Second record: delta from cumulative.
@@ -110,18 +113,18 @@ final class UsageHistoryTests: XCTestCase {
 
     // MARK: - RepoIdentity
 
-    func test_repoIdentity_normalizeStripsTrailingSlash() {
-        XCTAssertEqual(RepoIdentity.normalize("/Users/x/repo/"), "/Users/x/repo")
-        XCTAssertEqual(RepoIdentity.normalize("/Users/x/repo///"), "/Users/x/repo")
-    }
-
-    func test_repoIdentity_normalizePreservesRoot() {
-        XCTAssertEqual(RepoIdentity.normalize("/"), "/")
-    }
-
     func test_repoIdentity_emptyReturnsUnknown() {
         XCTAssertEqual(RepoIdentity.normalize(""), RepoKey.unknown)
         XCTAssertEqual(RepoIdentity.normalize("   "), RepoKey.unknown)
+    }
+
+    func test_repoIdentity_nonExistentPathBucketsAsOther() {
+        // Anything that isn't a real git repo on disk (and doesn't match a
+        // Conductor/Claude-worktree pattern) collapses to the single
+        // "(other)" bucket. The trim/expand step still runs internally but
+        // is exercised end-to-end via the canonical-resolution tests below.
+        XCTAssertEqual(RepoIdentity.normalize("/Users/x/repo/"), RepoKey.other)
+        XCTAssertEqual(RepoIdentity.normalize("/"), RepoKey.other)
     }
 
     func test_repoIdentity_displayName() {
@@ -189,14 +192,14 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(RepoIdentity.displayName(for: RepoIdentity.normalize(workspace.path)), "nautilus-ui")
     }
 
-    func test_canonicalRepo_noGitFallsBackToCwd() {
+    func test_canonicalRepo_noGitBucketsAsOther() {
+        // No `.git` anywhere → bucket under `RepoKey.other` so the by-repo
+        // UI doesn't surface random non-repo paths (UUIDs, home dir,
+        // Downloads, etc.) as if they were repos.
         RepoIdentity._resetCacheForTesting()
-        // No `.git` anywhere — we fall back to using the trimmed cwd. Useful
-        // for paths like `~/Desktop/Claude` that were Codex sessions before
-        // git init.
         let nonRepo = "/private/var/folders/no-such-path/\(UUID().uuidString)"
-        let normalized = RepoIdentity.normalize(nonRepo)
-        XCTAssertEqual(normalized, nonRepo)
+        XCTAssertEqual(RepoIdentity.normalize(nonRepo), RepoKey.other)
+        XCTAssertEqual(RepoIdentity.displayName(for: RepoKey.other), "Other")
     }
 
     func test_canonicalRepo_deadConductorBranchCollapsesByPattern() {
@@ -267,7 +270,8 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     func test_canonicalRepo_descendOnlyWhenSoleGitChild() throws {
-        // A wrapper containing TWO git children should NOT descend (ambiguous).
+        // A wrapper containing TWO git children should NOT descend (ambiguous)
+        // and the wrapper itself isn't a repo → falls through to `.other`.
         RepoIdentity._resetCacheForTesting()
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let wrapper = temp.appendingPathComponent("downloads")
@@ -277,8 +281,7 @@ final class UsageHistoryTests: XCTestCase {
         try FileManager.default.createDirectory(at: b.appendingPathComponent(".git"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temp) }
 
-        // Ambiguous → fall back to the wrapper path itself.
-        XCTAssertEqual(RepoIdentity.normalize(wrapper.path), wrapper.path)
+        XCTAssertEqual(RepoIdentity.normalize(wrapper.path), RepoKey.other)
     }
 
     // MARK: - Adaptive currency formatting
@@ -350,16 +353,24 @@ final class UsageHistoryTests: XCTestCase {
     }
 
     func test_loaderMultiCwdInOneClaudeFile() async throws {
+        RepoIdentity._resetCacheForTesting()
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let claudeDir = temp.appendingPathComponent("claude").appendingPathComponent("proj")
         let codexDir = temp.appendingPathComponent("codex")
         try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        // Two REAL on-disk git repos so canonical resolution doesn't
+        // collapse them into `.other`.
+        let repoA = temp.appendingPathComponent("repo-a")
+        let repoB = temp.appendingPathComponent("repo-b")
+        try FileManager.default.createDirectory(at: repoA.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: repoB.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
 
         // One file, two distinct cwds — verified-real scenario.
         let content = """
-        {"message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":500}},"timestamp":"\(isoNow())","requestId":"r1","cwd":"/Users/x/repo-a"}
-        {"message":{"id":"m2","model":"claude-sonnet-4-5","usage":{"input_tokens":2000,"output_tokens":1000}},"timestamp":"\(isoNow())","requestId":"r2","cwd":"/Users/x/repo-b"}
+        {"message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":500}},"timestamp":"\(isoNow())","requestId":"r1","cwd":"\(repoA.path)"}
+        {"message":{"id":"m2","model":"claude-sonnet-4-5","usage":{"input_tokens":2000,"output_tokens":1000}},"timestamp":"\(isoNow())","requestId":"r2","cwd":"\(repoB.path)"}
         """
         try content.write(to: claudeDir.appendingPathComponent("session1.jsonl"), atomically: true, encoding: .utf8)
 
@@ -371,8 +382,8 @@ final class UsageHistoryTests: XCTestCase {
 
         let byRepo = snapshot.claude.today.byRepo
         let repos = Set(byRepo.map(\.repo))
-        XCTAssertTrue(repos.contains("/Users/x/repo-a"))
-        XCTAssertTrue(repos.contains("/Users/x/repo-b"))
+        XCTAssertTrue(repos.contains(repoA.path))
+        XCTAssertTrue(repos.contains(repoB.path))
     }
 
     func test_loaderReentrancyCoalesces() async throws {

@@ -480,11 +480,12 @@ public actor UsageHistoryLoader {
 /// `byDay + singleRepo` shape, because a single Claude JSONL can contain
 /// records for multiple repos.
 struct AnalyticsCache: Codable, Sendable {
-    // v7 (2026-05-15): RepoIdentity now descends one level when no `.git`
-    // is found walking up — paths like `~/Downloads/CC Watch` (which wraps
-    // a sole `Clawdmeter/` git repo) now collapse into the underlying repo
-    // bucket. Old v6 caches re-parse on first load.
-    static let currentVersion: Int = 7
+    // v8 (2026-05-15): RepoIdentity now buckets every non-git cwd under
+    // the single `RepoKey.other` sentinel — previously paths like
+    // `/Users/x` or `~/.paperclip/instances/<env>/workspaces/<UUID>` (with
+    // no findable `.git`) showed up as their own rows, polluting the
+    // by-repo list. Old v7 caches re-parse on first load.
+    static let currentVersion: Int = 8
 
     let version: Int
     var files: [String: FileEntry]

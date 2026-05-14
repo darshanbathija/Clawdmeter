@@ -44,6 +44,7 @@ public enum RepoIdentity {
     /// or the original key for unknown / non-path values.
     public static func displayName(for key: RepoKey) -> String {
         if key == RepoKey.unknown { return "(unknown)" }
+        if key == RepoKey.other { return "Other" }
 
         let url = URL(fileURLWithPath: key)
         let last = url.lastPathComponent
@@ -111,7 +112,12 @@ public enum RepoIdentity {
         if let descended = tryDescendToSoleGitChild(path) {
             return descended
         }
-        return path
+        // Path isn't a git repo and we can't auto-discover one. Bucket it
+        // under the single "(other)" row so the UI doesn't show random
+        // UUIDs, ambient folders (Downloads, home dir), and dead Paperclip
+        // workspace IDs as if they were repos. The user explicitly asked
+        // for this cleanup after V1 ship.
+        return RepoKey.other
     }
 
     /// If `dir` has exactly one subdirectory that contains a `.git`, return
