@@ -173,6 +173,55 @@ Source PNG: `~/Downloads/Clawd Logo.png` (user's design). Crop pipeline in
 No flood-fill, no rim sweep, no pixel manipulation — the HSV crop alone
 removes the source's white outer area cleanly.
 
+## Sessions feature (added 2026-05-16)
+
+Read-write control plane for Claude Code + Codex CLI agent sessions, on top
+of the existing read-only analytics. Mac runs a SwiftNIO-free
+Network.framework HTTP+WS daemon (port 21731 / 21732) inside `ClawdmeterMac`;
+iPhone + Watch consume it over Tailscale. tmux `-CC` is the PTY layer.
+
+Architecture lives under `apple/ClawdmeterMac/AgentControl/`:
+- `TmuxControlClient` (actor) + `ControlModeParser` + `PseudoTerminal` —
+  the parser was Phase 0-validated against tmux 3.6a; see
+  `tools/tmux-cc-probe/` for the unit + integration tests.
+- `AgentControlServer` + `WSChannel` protocol + `TerminalWebSocketChannel`
+  + `AgentEventStream` — dual-port listener (HTTP + WS) with
+  accept-handler peer filter to `127/8`, `::1`, `100.64/10` CGNAT, and
+  `fd7a:115c:a1e0::/48` Tailscale IPv6. Every endpoint requires
+  `Authorization: Bearer <token>` from `PairingTokenStore`. Non-loopback
+  additionally verified via `TailscaleWhois` (60s cache, fail-closed-on-error).
+- `AgentSessionRegistry` (@MainActor ObservableObject) — atomic
+  `sessions.json` schema v1 + per-session monotonic `eventSeq` for the E8
+  cursor contract.
+- `RepoIndex` (actor) — background refresh from `~/.claude/projects/`,
+  `~/.codex/sessions/`, and user-configured scan roots (default empty;
+  bounded 4-level depth on git discovery).
+- `JSONLTail` + `DoneDetector` + `PlanModeWatcher` + `SessionEventWiring`
+  — Phase 4 wiring. Per-session JSONL watch fires plan-ready /
+  done-detected events into the registry, which the AgentEventStream
+  fans out to subscribed iOS clients.
+- `TmuxSupervisor` — auto-restart on `%exit` with exponential backoff;
+  marks sessions degraded; banner in Mac Settings → Sessions tab.
+- `ShellRunner` — argv-only subprocess wrapper. NEVER concat into shell
+  strings (the repo path has a space; concat breaks).
+
+iOS surface: `apple/ClawdmeterMac/ClawdmeteriOS/iOSSessionsView.swift`
+(third TabView tab) + `AgentControlClient` + `PairingScannerView` (AVCapture
+QR scanner) + `iOSTerminalView` (SwiftTerm + 7-button keyboard accessory)
++ `iOSNotificationManager` (BGAppRefreshTask + UNUserNotificationCenter,
+D15 path — no APNS).
+
+Watch surface: `PlanWaitingComplication` (`.accessoryCircular` only for v1
+per D10) + `PlanApprovalView` + `WatchPlanBridge` (WCSession from iPhone).
+
+Build matrix: Mac, iOS, and Watch all build clean. Tests: 71/71 in
+ClawdmeterShared, 19/19 in tools/tmux-cc-probe. Implementation status doc
+at `docs/designs/sessions-IMPLEMENTATION-STATUS.md`; full CEO plan at
+`docs/designs/sessions-control-plane.md`.
+
+Feature flag: `UserDefaults clawdmeter.sessions.enabled` (default true).
+When false, daemon doesn't start and Sessions tab is hidden.
+
 ## Style + voice
 
 - Code comments lead with **what + why**, not implementation play-by-play.
