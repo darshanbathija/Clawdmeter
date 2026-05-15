@@ -1,0 +1,173 @@
+import Foundation
+import ClawdmeterShared
+import OSLog
+
+private let clientLogger = Logger(subsystem: "com.clawdmeter.ios", category: "AgentControlClient")
+
+/// HTTP + WS client for the Mac daemon. Reads pairing config from
+/// UserDefaults + Keychain. Used by iOSSessionsView + iOSNotificationManager.
+public final class AgentControlClient: ObservableObject {
+
+    public static let hostKey = "clawdmeter.sessions.macHost"
+    public static let httpPortKey = "clawdmeter.sessions.httpPort"
+    public static let wsPortKey = "clawdmeter.sessions.wsPort"
+    public static let tokenKey = "clawdmeter.sessions.token"
+
+    @Published public private(set) var isConfigured: Bool = false
+    @Published public private(set) var repos: [AgentRepo] = []
+    @Published public private(set) var sessions: [AgentSession] = []
+    @Published public private(set) var lastPolledAt: Date?
+    @Published public private(set) var lastError: String?
+
+    public init() {
+        self.isConfigured = (host != nil && token != nil)
+    }
+
+    // MARK: - Config
+
+    public var host: String? {
+        UserDefaults.standard.string(forKey: Self.hostKey)
+    }
+    public var httpPort: Int {
+        UserDefaults.standard.integer(forKey: Self.httpPortKey).nonZeroOrDefault(21731)
+    }
+    public var wsPort: Int {
+        UserDefaults.standard.integer(forKey: Self.wsPortKey).nonZeroOrDefault(21732)
+    }
+    public var token: String? {
+        UserDefaults.standard.string(forKey: Self.tokenKey)
+    }
+
+    public func setPairing(host: String, httpPort: Int, wsPort: Int, token: String) {
+        UserDefaults.standard.set(host, forKey: Self.hostKey)
+        UserDefaults.standard.set(httpPort, forKey: Self.httpPortKey)
+        UserDefaults.standard.set(wsPort, forKey: Self.wsPortKey)
+        UserDefaults.standard.set(token, forKey: Self.tokenKey)
+        DispatchQueue.main.async {
+            self.isConfigured = true
+        }
+    }
+
+    public func clearPairing() {
+        for key in [Self.hostKey, Self.httpPortKey, Self.wsPortKey, Self.tokenKey] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        DispatchQueue.main.async {
+            self.isConfigured = false
+        }
+    }
+
+    // MARK: - REST
+
+    private func makeRequest(path: String, method: String = "GET", body: Data? = nil) -> URLRequest? {
+        guard let host, let token else { return nil }
+        guard let url = URL(string: "http://\(host):\(httpPort)\(path)") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.httpBody = body
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        req.timeoutInterval = 8
+        return req
+    }
+
+    @MainActor
+    public func refreshAll() async {
+        await refreshRepos()
+        await refreshSessions()
+    }
+
+    @MainActor
+    public func refreshRepos() async {
+        guard let request = makeRequest(path: "/repos") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            self.repos = try decoder.decode([AgentRepo].self, from: data)
+            self.lastPolledAt = Date()
+            self.lastError = nil
+        } catch {
+            self.lastError = error.localizedDescription
+            clientLogger.debug("refreshRepos failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    public func refreshSessions() async {
+        guard let request = makeRequest(path: "/sessions") else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            self.sessions = try decoder.decode([AgentSession].self, from: data)
+        } catch {
+            clientLogger.debug("refreshSessions failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    public func createSession(_ req: NewSessionRequest) async -> AgentSession? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let body = try? encoder.encode(req),
+              let request = makeRequest(path: "/sessions", method: "POST", body: body) else {
+            return nil
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let session = try decoder.decode(AgentSession.self, from: data)
+            sessions.append(session)
+            return session
+        } catch {
+            self.lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    public func deleteSession(id: UUID) async {
+        guard let request = makeRequest(path: "/sessions/\(id.uuidString)", method: "DELETE") else { return }
+        do {
+            _ = try await URLSession.shared.data(for: request)
+            sessions.removeAll { $0.id == id }
+        } catch {
+            self.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    public func approvePlan(sessionId: UUID) async {
+        guard let request = makeRequest(path: "/sessions/\(sessionId.uuidString)/approve-plan", method: "POST") else { return }
+        do {
+            _ = try await URLSession.shared.data(for: request)
+        } catch {
+            self.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    public func fetchNeedsAttention() async -> [NotificationEvent] {
+        guard let request = makeRequest(path: "/sessions/needs-attention") else { return [] }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let response = try decoder.decode(NeedsAttentionResponse.self, from: data)
+            self.lastPolledAt = response.serverTime
+            return response.events
+        } catch {
+            clientLogger.debug("needs-attention failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+}
+
+private extension Int {
+    func nonZeroOrDefault(_ defaultValue: Int) -> Int { self == 0 ? defaultValue : self }
+}
