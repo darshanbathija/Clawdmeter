@@ -31,12 +31,14 @@ struct SessionWorkspaceView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Below this width the review pane crowds the chat (the right-pane
-    /// tabs wrap letter-by-letter at the observed cramped sizes). We hide
-    /// it automatically so Sessions sidebar + chat get the room. Above the
+    /// Below this width the review pane crowds the chat. We hide it
+    /// automatically so Sessions sidebar + chat get the room. Above the
     /// threshold the user's `showingReviewPane` toggle takes over.
-    /// 220 (sidebar min) + 420 (center min) + 320 (review min) + chrome ≈ 1080.
-    private static let reviewPaneThreshold: CGFloat = 1100
+    /// 220 (sidebar min) + 480 (center min) + 380 (review min) + chrome ≈ 1300.
+    /// Bumped above 1100 after observing the tab strip squeeze at narrower
+    /// widths — review pane needs ~380pt to render its 6-tab chip row
+    /// without the user having to swipe-scroll through them.
+    private static let reviewPaneThreshold: CGFloat = 1280
 
     private var effectiveShowReviewPane: Bool {
         showingReviewPane && workspaceWidth >= Self.reviewPaneThreshold
@@ -98,7 +100,7 @@ struct SessionWorkspaceView: View {
                         Task { await model.approvePlan(id: session.id) }
                     }
                 )
-                .frame(minWidth: 320, idealWidth: 380, maxWidth: 520)
+                .frame(minWidth: 380, idealWidth: 440, maxWidth: 560)
             }
         }
         .background(backgroundColor)
@@ -950,12 +952,6 @@ private struct ChatThreadScroll: View {
     /// resetting expand state when the user scrolls.
     @State private var expanded: Set<String> = []
 
-    /// Smart auto-scroll: only follow new messages when the user is already
-    /// reading at the bottom. Otherwise we'd yank them away from history
-    /// every time the agent emitted a token. Updated by the bottom anchor's
-    /// `.onAppear` / `.onDisappear`.
-    @State private var isPinnedToBottom: Bool = true
-
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -969,43 +965,45 @@ private struct ChatThreadScroll: View {
                                 .padding(.horizontal, 16)
                         }
                     }
-                    // Sentinel anchor: when this view is on-screen we know
-                    // the user is at the tail of the thread, so we follow
-                    // new messages. When it disappears we stop.
                     Color.clear
                         .frame(height: 12)
                         .id("bottom-anchor")
-                        .onAppear { isPinnedToBottom = true }
-                        .onDisappear { isPinnedToBottom = false }
                 }
                 .padding(.vertical, 12)
             }
-            .overlay(alignment: .bottomTrailing) {
-                if !isPinnedToBottom, !store.messages.isEmpty {
-                    Button(action: {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                        }
-                    }) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.primary)
-                            .background(.regularMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 18)
-                    .padding(.bottom, 12)
-                    .help("Jump to latest")
-                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                }
-            }
+            // WhatsApp behavior: always pin to latest. New messages, plan
+            // text updates, store reload — anything that touches the
+            // thread snaps us back to the tail. The user reads history by
+            // scrolling up; the moment new content arrives they're back
+            // at the latest. No "Jump to latest" pill required.
             .onChange(of: store.messages.count) { _, _ in
-                guard isPinnedToBottom else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                }
+                stickToBottom(proxy)
+            }
+            .onChange(of: store.messages.last?.id) { _, _ in
+                stickToBottom(proxy)
             }
             .onAppear {
+                // LazyVStack hasn't laid out yet on first appear — fire
+                // multiple deferred scrolls so the initial render lands
+                // at the tail regardless of how the layout settles.
+                for delay in [0.0, 0.05, 0.15, 0.4] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private func stickToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+        }
+        // Some message renders settle a frame after the count change
+        // (markdown layout, disclosure-group height) — re-scroll once
+        // more after a short beat so we land at the new bottom.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeOut(duration: 0.15)) {
                 proxy.scrollTo("bottom-anchor", anchor: .bottom)
             }
         }
@@ -1329,11 +1327,18 @@ private struct ReviewPane: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 2) {
-            ForEach(SessionWorkspaceView.RightPaneTab.allCases) { tab in
-                tabChip(tab)
+        HStack(spacing: 4) {
+            // The chip strip scrolls horizontally if there's not enough
+            // room — keeps each chip at natural width instead of letting
+            // SwiftUI squeeze the text into per-character wrapping.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(SessionWorkspaceView.RightPaneTab.allCases) { tab in
+                        tabChip(tab)
+                    }
+                }
             }
-            Spacer()
+            .scrollClipDisabled()
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
@@ -1354,6 +1359,8 @@ private struct ReviewPane: View {
                     .font(.system(size: 9))
                 Text(tab.rawValue)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
