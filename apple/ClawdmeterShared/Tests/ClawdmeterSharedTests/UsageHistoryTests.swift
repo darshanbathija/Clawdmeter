@@ -268,6 +268,52 @@ final class UsageHistoryTests: XCTestCase {
         XCTAssertEqual(RepoIdentity.normalize(b), "/Users/fake/work/myrepo")
     }
 
+    /// T30 — exercises the .claude/worktrees pattern with a real `.git`
+    /// in the parent on disk. Sessions v2 spawns each session inside a
+    /// `<repo>/.claude/worktrees/<slug-uuid>/` directory; the analytics
+    /// pipeline must bucket those JSONLs back to the parent repo, not
+    /// "(other)". The no-git fallback above guards the path-shape
+    /// heuristic; this guards the canonical-resolution path the live
+    /// daemon actually hits.
+    func test_canonicalRepo_claudeWorktreeWithRealGitParent() throws {
+        RepoIdentity._resetCacheForTesting()
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let repo = temp.appendingPathComponent("axtior-platform")
+        let worktree = repo
+            .appendingPathComponent(".claude")
+            .appendingPathComponent("worktrees")
+            .appendingPathComponent("fix-auth-7f3a2c")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        // Real .git directory on the parent — the analytics layer
+        // canonicalizes by walking up from a `cwd` until it finds one.
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        // A session spawned inside the worktree dir should bucket to the
+        // parent repo's canonical path. RepoKey is the canonicalized
+        // absolute path; compare via standardizedFileURL to handle the
+        // `/private/var` ↔ `/var` symlink macOS injects in temp paths.
+        let normalized = RepoIdentity.normalize(worktree.path)
+        let expected = repo.standardizedFileURL.path
+        let normalizedStandardized = URL(fileURLWithPath: normalized).standardizedFileURL.path
+        XCTAssertEqual(normalizedStandardized, expected,
+                       "Worktree sessions must bucket to parent repo, not \(normalized)")
+        // Sibling worktrees collapse to the same bucket.
+        let sibling = repo
+            .appendingPathComponent(".claude")
+            .appendingPathComponent("worktrees")
+            .appendingPathComponent("refactor-redis-9b1c")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        let siblingNormalized = URL(fileURLWithPath: RepoIdentity.normalize(sibling.path))
+            .standardizedFileURL.path
+        XCTAssertEqual(siblingNormalized, expected)
+        // Display name comes from the repo's basename, not the worktree's.
+        XCTAssertEqual(RepoIdentity.displayName(for: normalized), "axtior-platform")
+    }
+
     func test_canonicalRepo_descendsToSoleGitChild() throws {
         // `wrapper/` has no `.git`, but contains exactly one git child
         // (`Clawdmeter/`). cwd=wrapper/ should bucket as `wrapper/Clawdmeter`

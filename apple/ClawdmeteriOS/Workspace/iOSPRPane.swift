@@ -104,8 +104,11 @@ struct iOSPRPane: View {
                 }
 
                 if let checks = pr.checksRollup, !checks.isEmpty {
-                    Label("CI: \(checks)", systemImage: checks == "success" ? "checkmark.circle" : "xmark.circle")
-                        .foregroundStyle(checks == "success" ? .green : .red)
+                    // Partial-state per Pass 2 table: "checks pending" is
+                    // a distinct render from success/failure so the user
+                    // can tell at a glance whether to wait or react.
+                    Label("CI: \(checks)", systemImage: checksGlyph(checks))
+                        .foregroundStyle(checksColor(checks))
                 }
 
                 Divider()
@@ -160,6 +163,27 @@ struct iOSPRPane: View {
         case .merged: return .purple
         case .closed: return .red
         case .draft:  return .secondary
+        }
+    }
+
+    private func checksGlyph(_ rollup: String) -> String {
+        switch rollup.lowercased() {
+        case "success", "passed":        return "checkmark.circle"
+        case "failure", "failed", "error": return "xmark.circle"
+        case "pending", "running", "in_progress", "queued":
+            return "clock.arrow.circlepath"
+        case "neutral", "skipped":       return "minus.circle"
+        default:                          return "questionmark.circle"
+        }
+    }
+
+    private func checksColor(_ rollup: String) -> Color {
+        switch rollup.lowercased() {
+        case "success", "passed":        return .green
+        case "failure", "failed", "error": return .red
+        case "pending", "running", "in_progress", "queued":
+            return SessionsV2Theme.warn
+        default:                          return .secondary
         }
     }
 
