@@ -84,20 +84,28 @@ public final class Pricing: @unchecked Sendable {
     public func cost(for model: String, tokens: TokenTotals) -> Decimal {
         guard let rates = self.rates(for: model) else { return 0 }
 
-        // Tiering split for input tokens.
+        // Tiering split for input tokens. Models without an
+        // `aboveBoundary` rate (most models, including non-Claude) use
+        // the base rate for ALL tokens — the previous implementation
+        // capped `belowInput` at `boundaryTokens` and only charged the
+        // above portion when a tier rate existed, silently dropping
+        // every input token past 200k for un-tiered models. Real bug:
+        // a 915M-token Opus session was reading $0.60 of input cost
+        // instead of $4.5k.
         let inputTokens = tokens.inputTokens
         let boundary = rates.boundaryTokens
-
-        let belowInput = min(inputTokens, boundary)
-        let aboveInput = max(0, inputTokens - boundary)
-        let hasAboveTier = rates.aboveBoundary != nil && aboveInput > 0
-
+        let hasAboveTier = rates.aboveBoundary != nil && inputTokens > boundary
         let aboveRates = rates.aboveBoundary
 
         var total: Decimal = 0
-        total += rates.inputPerToken * Decimal(belowInput)
         if hasAboveTier, let above = aboveRates {
+            let belowInput = min(inputTokens, boundary)
+            let aboveInput = inputTokens - boundary
+            total += rates.inputPerToken * Decimal(belowInput)
             total += above.inputPerToken * Decimal(aboveInput)
+        } else {
+            // No tier flip — single rate applies to the full input count.
+            total += rates.inputPerToken * Decimal(inputTokens)
         }
 
         // Output, cache-creation, cache-read: when the request crosses the

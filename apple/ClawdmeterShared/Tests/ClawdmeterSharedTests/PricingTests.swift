@@ -48,4 +48,62 @@ final class PricingTests: XCTestCase {
     func test_costIsZeroForZeroTokens() {
         XCTAssertEqual(pricing.cost(for: "claude-sonnet-4-5", tokens: .zero), 0)
     }
+
+    // MARK: - Above-boundary input bug (regression guard)
+
+    func test_untieredModelChargesAllInputTokensAtBaseRate() {
+        // Bug fixed in this commit: for models without an
+        // `*_above_200k_tokens` rate set, `Pricing.cost` previously
+        // capped the input at the 200K boundary and silently dropped
+        // every token past it. A 1M-token input session on a non-tiered
+        // model was reading $0.60 instead of $3.00 (5x undercount).
+        let tokens = TokenTotals(inputTokens: 1_000_000)
+        let cost = pricing.cost(for: "gpt-5", tokens: tokens)
+        let dbl = (cost as NSDecimalNumber).doubleValue
+        // gpt-5 input is in the snapshot at a stable rate. The full
+        // 1M tokens should be charged, not just the first 200K. Use a
+        // generous lower bound that's > 5x what the buggy path would
+        // return.
+        XCTAssertGreaterThan(dbl, 1.0,
+                             "expected ~$1.25+ for 1M gpt-5 input tokens; got $\(dbl)")
+    }
+
+    func test_untieredModelCostScalesLinearlyPast200kBoundary() {
+        // Belt-and-suspenders: a 5M-token input should cost roughly 5x
+        // what a 1M-token input does, on a model without tier rates.
+        let small = pricing.cost(for: "gpt-5", tokens: TokenTotals(inputTokens: 1_000_000))
+        let big = pricing.cost(for: "gpt-5", tokens: TokenTotals(inputTokens: 5_000_000))
+        let smallD = (small as NSDecimalNumber).doubleValue
+        let bigD = (big as NSDecimalNumber).doubleValue
+        XCTAssertEqual(bigD / smallD, 5.0, accuracy: 0.01,
+                       "5M tokens should cost exactly 5x 1M tokens on a flat-rate model")
+    }
+
+    // MARK: - SessionActivityStrip cost-estimator path (regression guard)
+
+    func test_opusSessionWithRealisticCacheMixIsRoughlyAccurate() {
+        // Regression: a 915M-token Opus-4-7 session was reading $34.56
+        // when the true Opus cost was ~$721, because the chat-store
+        // conflated all input + cache_creation + cache_read into a
+        // single `inputTokens` value AND used a hardcoded Sonnet model.
+        //
+        // With the four-category split + correct model hint, the cost
+        // should land in the same ballpark as the manual calculation:
+        //   input         5,769 × $5/MTok   = $0.03
+        //   cache_create 13.1M × $6.25/MTok = $82.15
+        //   cache_read   1.13B × $0.50/MTok = $563.0
+        //   output       3.05M × $25/MTok   = $76.25
+        //   TOTAL                          ≈ $721
+        let tokens = TokenTotals(
+            inputTokens: 5_769,
+            outputTokens: 3_050_822,
+            cacheCreationTokens: 13_144_300,
+            cacheReadTokens: 1_125_971_605
+        )
+        let cost = pricing.cost(for: "claude-opus-4-7", tokens: tokens)
+        let dbl = (cost as NSDecimalNumber).doubleValue
+        // Allow ±15% wiggle for rate snapshot updates.
+        XCTAssertGreaterThan(dbl, 600, "expected ~$721 for the Opus session, got $\(dbl)")
+        XCTAssertLessThan(dbl, 850, "expected ~$721 for the Opus session, got $\(dbl)")
+    }
 }

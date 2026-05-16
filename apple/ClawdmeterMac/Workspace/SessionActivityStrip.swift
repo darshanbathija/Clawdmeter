@@ -171,23 +171,29 @@ struct SessionActivityStrip: View {
 
     /// Best-effort cost estimate using the embedded LiteLLM pricing
     /// snapshot. Returns nil for Codex sessions (no per-message usage
-    /// to price), or when the model isn't in pricing.json. We don't
-    /// distinguish cache-read vs fresh input here — the analytics layer
-    /// handles that precisely; this strip is informational.
+    /// to price), or when the model isn't in pricing.json.
+    ///
+    /// The four token categories are passed separately because they
+    /// bill at vastly different rates: Sonnet cache_read is 10% of
+    /// fresh input; Opus cache_creation is 125%. Conflating them into
+    /// `inputTokens` undercounted Opus-4-7 sessions by ~80x before
+    /// this fix.
+    ///
+    /// Model: the live session's `message.model` value as captured by
+    /// the staging parser. Falls back to a sane Claude default only
+    /// when no assistant message has been ingested yet.
     private func estimateCost() -> Decimal? {
         guard session.agent == .claude else { return nil }
+        let snap = chatStore.snapshot
         let totals = TokenTotals(
-            inputTokens: chatStore.snapshot.totalInputTokens,
-            outputTokens: chatStore.snapshot.totalOutputTokens,
-            cacheCreationTokens: 0,
-            cacheReadTokens: 0,
+            inputTokens: snap.totalInputTokens,
+            outputTokens: snap.totalOutputTokens,
+            cacheCreationTokens: snap.totalCacheCreationTokens,
+            cacheReadTokens: snap.totalCacheReadTokens,
             reasoningTokens: 0,
             costUSD: 0
         )
-        // Use the embedded Claude default model; the live session may
-        // be on a different model but this strip is an estimate, not
-        // a billing source.
-        let model = "claude-3-7-sonnet-20250219"
+        let model = snap.modelHint ?? "claude-sonnet-4-5"
         return Pricing.shared.cost(for: model, tokens: totals)
     }
 

@@ -44,13 +44,20 @@ public final class SessionChatStore: ObservableObject {
         public let planSteps: [PlanStep]
         public let sourceEntries: [SourceEntry]
         public let artifactEntries: [ArtifactEntry]
-        /// Total input tokens summed across all assistant messages in this
-        /// session. Pulled from each line's `message.usage.input_tokens` +
-        /// `cache_creation_input_tokens` + `cache_read_input_tokens` —
-        /// matches the analytics layer's `inputTokens + cacheReadTokens`
-        /// reading.
+        /// Fresh input tokens (`message.usage.input_tokens`). Held
+        /// separately from cache_creation and cache_read so the cost
+        /// estimator can apply the right rate per category — Sonnet's
+        /// cache_read rate is 10x cheaper than fresh input.
         public let totalInputTokens: Int
         public let totalOutputTokens: Int
+        public let totalCacheCreationTokens: Int
+        public let totalCacheReadTokens: Int
+        /// Last assistant message's `message.model` field. We use the
+        /// latest one because users sometimes switch mid-session via
+        /// `/model`; the most recent tokens are billed at the most
+        /// recent model's rates. Nil for sessions with no Claude
+        /// assistant turns ingested yet.
+        public let modelHint: String?
         /// Timestamp of the latest ingested message. Drives the
         /// "thinking" indicator — the chat shows the running animation
         /// when the file has been touched within the activity window.
@@ -67,6 +74,9 @@ public final class SessionChatStore: ObservableObject {
             artifactEntries: [ArtifactEntry] = [],
             totalInputTokens: Int = 0,
             totalOutputTokens: Int = 0,
+            totalCacheCreationTokens: Int = 0,
+            totalCacheReadTokens: Int = 0,
+            modelHint: String? = nil,
             lastEventAt: Date? = nil,
             updateCounter: UInt64
         ) {
@@ -76,15 +86,21 @@ public final class SessionChatStore: ObservableObject {
             self.artifactEntries = artifactEntries
             self.totalInputTokens = totalInputTokens
             self.totalOutputTokens = totalOutputTokens
+            self.totalCacheCreationTokens = totalCacheCreationTokens
+            self.totalCacheReadTokens = totalCacheReadTokens
+            self.modelHint = modelHint
             self.lastEventAt = lastEventAt
             self.updateCounter = updateCounter
         }
 
         public static let empty = ChatSnapshot(items: [], updateCounter: 0)
 
-        /// Total tokens for the session — input + output combined. Used
-        /// by the activity strip beneath the composer.
-        public var totalTokens: Int { totalInputTokens + totalOutputTokens }
+        /// Headline tokens for the activity strip — sum of all four
+        /// categories. Matches the analytics layer's `TokenTotals.totalTokens`.
+        public var totalTokens: Int {
+            totalInputTokens + totalOutputTokens
+                + totalCacheCreationTokens + totalCacheReadTokens
+        }
     }
 
     @Published public private(set) var snapshot: ChatSnapshot = .empty
@@ -536,14 +552,21 @@ public final class SessionChatStore: ObservableObject {
 struct ParsedLine: Sendable {
     let timestamp: Date
     let messages: [ChatMessage]
-    /// Delta input tokens contributed by this line. Pulled from
-    /// `message.usage.input_tokens + cache_creation_input_tokens +
-    /// cache_read_input_tokens` on Claude assistant turns. Zero for
-    /// user/meta lines and for Codex (Codex's token totals live in
-    /// `event_msg.token_count` events which we don't surface as chat).
+    /// Per-category token deltas pulled from `message.usage` on Claude
+    /// assistant turns. Each category is billed at a different rate —
+    /// cache_read at 10% of fresh input, cache_creation at 125% — so
+    /// keeping them separate is required for an accurate cost estimate.
+    /// All zero for user/meta lines and for Codex (Codex's token totals
+    /// live in `event_msg.token_count` events the chat parser doesn't
+    /// surface).
     let deltaInputTokens: Int
-    /// Delta output tokens — `message.usage.output_tokens`.
     let deltaOutputTokens: Int
+    let deltaCacheCreationTokens: Int
+    let deltaCacheReadTokens: Int
+    /// Model the message was billed against (`message.model`). Used as
+    /// the cost-estimator hint — we pick the latest seen, since users
+    /// sometimes switch mid-session.
+    let model: String?
 
     /// Convert a raw JSONL dict into a typed ParsedLine. Returns `nil` for
     /// lines we don't surface (queue-operation, last-prompt, attachment,
@@ -596,7 +619,12 @@ struct ParsedLine: Sendable {
             }
         }
         guard !out.isEmpty else { return nil }
-        return ParsedLine(timestamp: at, messages: out, deltaInputTokens: 0, deltaOutputTokens: 0)
+        return ParsedLine(
+            timestamp: at, messages: out,
+            deltaInputTokens: 0, deltaOutputTokens: 0,
+            deltaCacheCreationTokens: 0, deltaCacheReadTokens: 0,
+            model: nil
+        )
     }
 
     private static func decodeAssistant(json: [String: Any], at: Date) -> ParsedLine? {
@@ -638,22 +666,28 @@ struct ParsedLine: Sendable {
             }
         }
         guard !out.isEmpty else { return nil }
-        // Pull Claude's per-message usage. The shape matches the
-        // analytics layer's parser:
-        //   inputTokens = input_tokens + cache_creation + cache_read
-        //   outputTokens = output_tokens
-        // For Codex (no `usage` on assistant messages), both stay zero.
+        // Split Claude's `message.usage` into the four categories
+        // ClaudeUsageParser uses for analytics. Conflating them into a
+        // single `inputTokens` value undercounted cost by ~80x in the
+        // activity strip because cache_read is billed at 10% of fresh
+        // input AND because Pricing.cost previously silently dropped
+        // input tokens past the 200K boundary for un-tiered models.
         var inTok = 0
         var outTok = 0
+        var cacheCreate = 0
+        var cacheRead = 0
         if let usage = message["usage"] as? [String: Any] {
-            inTok += (usage["input_tokens"] as? Int) ?? 0
-            inTok += (usage["cache_creation_input_tokens"] as? Int) ?? 0
-            inTok += (usage["cache_read_input_tokens"] as? Int) ?? 0
+            inTok = (usage["input_tokens"] as? Int) ?? 0
             outTok = (usage["output_tokens"] as? Int) ?? 0
+            cacheCreate = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+            cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
         }
+        let model = (message["model"] as? String)
         return ParsedLine(
             timestamp: at, messages: out,
-            deltaInputTokens: inTok, deltaOutputTokens: outTok
+            deltaInputTokens: inTok, deltaOutputTokens: outTok,
+            deltaCacheCreationTokens: cacheCreate, deltaCacheReadTokens: cacheRead,
+            model: model
         )
     }
 }
@@ -683,13 +717,18 @@ actor StagingParser {
     /// `SessionChatStore.setPlanText`. Drives the `planSteps` precompute
     /// alongside steps mined from assistant messages.
     private var planText: String? = nil
-    /// Accumulated tokens for the session metadata strip. Summed from
-    /// each ParsedLine's `deltaInputTokens` / `deltaOutputTokens` (Claude
-    /// `message.usage` field). Codex sessions don't surface token totals
-    /// here — those live in `event_msg.token_count` events the chat
-    /// parser doesn't currently process.
+    /// Accumulated tokens for the session metadata strip — split into
+    /// the four billable categories so the cost estimator can apply
+    /// the right rate per category. Pulled from `message.usage` on
+    /// Claude assistant turns; all zero for Codex (handled in analytics).
     private var totalInputTokens: Int = 0
     private var totalOutputTokens: Int = 0
+    private var totalCacheCreationTokens: Int = 0
+    private var totalCacheReadTokens: Int = 0
+    /// Latest `message.model` value the staging parser saw. The activity
+    /// strip's cost estimator uses this — sessions can switch mid-stream
+    /// via `/model` and the most recent rate should apply going forward.
+    private var modelHint: String? = nil
     /// Timestamp of the most-recently ingested line. The chat's
     /// "thinking" indicator pulses when this is within the activity
     /// window (Date() - 30s).
@@ -766,6 +805,14 @@ actor StagingParser {
             }
             totalInputTokens += line.deltaInputTokens
             totalOutputTokens += line.deltaOutputTokens
+            totalCacheCreationTokens += line.deltaCacheCreationTokens
+            totalCacheReadTokens += line.deltaCacheReadTokens
+            // Take the latest non-empty model hint. Reverse-tail ingests
+            // can arrive out of order, but the latest timestamp wins
+            // because we re-walk this on every snapshot rebuild anyway.
+            if let m = line.model, !m.isEmpty {
+                modelHint = m
+            }
         }
     }
 
@@ -790,6 +837,9 @@ actor StagingParser {
         lowercasedAssistantBodies.removeAll(keepingCapacity: false)
         totalInputTokens = 0
         totalOutputTokens = 0
+        totalCacheCreationTokens = 0
+        totalCacheReadTokens = 0
+        modelHint = nil
         lastEventAt = nil
         cachedSnapshot = .empty
         cachedCounter = 0
@@ -856,6 +906,9 @@ actor StagingParser {
             artifactEntries: artifacts,
             totalInputTokens: totalInputTokens,
             totalOutputTokens: totalOutputTokens,
+            totalCacheCreationTokens: totalCacheCreationTokens,
+            totalCacheReadTokens: totalCacheReadTokens,
+            modelHint: modelHint,
             lastEventAt: lastEventAt,
             updateCounter: updateCounter
         )
