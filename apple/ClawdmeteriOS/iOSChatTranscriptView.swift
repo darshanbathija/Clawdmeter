@@ -1,0 +1,304 @@
+import SwiftUI
+import ClawdmeterShared
+
+/// Read-only chat renderer for the iOS Sessions tab. Fetches the parsed
+/// JSONL transcript from the Mac daemon's `/transcript?path=` endpoint
+/// and shows the conversation as user / assistant bubbles + collapsed
+/// "Ran N commands" tool runs, matching what the Mac chat view shows.
+///
+/// Previously the OutsideSessionDetailView showed only a "Read-only"
+/// badge + JSONL path + last write time, which carried zero of the
+/// session's actual content. With the transcript endpoint in place the
+/// iPhone now gets the same chat the Mac sees for both:
+///   • Outside (read-only) sessions — Conductor / Cursor / Terminal
+///   • Clawdmeter-spawned sessions on the structured tab
+struct iOSChatTranscriptView: View {
+    let jsonlPath: String
+    /// Optional banner to surface above the chat — e.g. a "Read-only"
+    /// pill for outside sessions plus an explanatory line.
+    let banner: BannerStyle?
+    @ObservedObject var client: AgentControlClient
+
+    @State private var messages: [ChatMessage] = []
+    @State private var truncated: Bool = false
+    @State private var isLoading: Bool = true
+    @State private var errorMessage: String?
+
+    enum BannerStyle {
+        case readOnlyOutside
+    }
+
+    var body: some View {
+        Group {
+            if isLoading {
+                ProgressView("Loading transcript…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = errorMessage {
+                ContentUnavailableView(
+                    "Couldn't load transcript",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+            } else if messages.isEmpty {
+                ContentUnavailableView(
+                    "No messages yet",
+                    systemImage: "ellipsis.bubble",
+                    description: Text("The JSONL exists but doesn't contain any assistant or user messages.")
+                )
+            } else {
+                chatList
+            }
+        }
+        .task(id: jsonlPath) { await load() }
+        .refreshable { await load() }
+    }
+
+    private var chatList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if let banner { bannerView(banner) }
+                if truncated {
+                    Label(
+                        "Showing the most recent 500 messages — older history stays on your Mac.",
+                        systemImage: "rectangle.compress.vertical"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                }
+                ForEach(items) { item in
+                    itemRow(item)
+                        .padding(.horizontal, 12)
+                }
+                Color.clear.frame(height: 12)
+            }
+            .padding(.vertical, 12)
+        }
+        .background(Color(.systemGroupedBackground))
+    }
+
+    @ViewBuilder
+    private func bannerView(_ style: BannerStyle) -> some View {
+        switch style {
+        case .readOnlyOutside:
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "eye")
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Read-only")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Text("Started outside Clawdmeter (Conductor, Cursor, or a Terminal-launched agent). The transcript streams from your Mac over Tailscale.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 12)
+        }
+    }
+
+    // MARK: - Items
+
+    /// Bucket consecutive tool_use / tool_result messages into "Ran N
+    /// commands" disclosure groups, the same way the Mac
+    /// `ChatThreadScroll` does. Plain prose flushes the pending run.
+    private var items: [Item] {
+        var out: [Item] = []
+        var pending: [(call: ChatMessage, result: ChatMessage?)] = []
+        var pendingIndex: [String: Int] = [:]
+
+        func flushPending() {
+            guard !pending.isEmpty else { return }
+            out.append(.toolRun(id: pending.first!.call.id, pairs: pending))
+            pending.removeAll()
+            pendingIndex.removeAll()
+        }
+
+        for msg in messages {
+            switch msg.kind {
+            case .toolCall:
+                let toolUseId = msg.id.hasPrefix("call:")
+                    ? String(msg.id.dropFirst("call:".count)) : msg.id
+                pendingIndex[toolUseId] = pending.count
+                pending.append((call: msg, result: nil))
+            case .toolResult:
+                let toolUseId = msg.id.hasPrefix("result:")
+                    ? String(msg.id.dropFirst("result:".count)) : msg.id
+                if let idx = pendingIndex[toolUseId] {
+                    pending[idx].result = msg
+                }
+            case .userText, .assistantText, .meta:
+                flushPending()
+                out.append(.message(msg))
+            }
+        }
+        flushPending()
+        return out
+    }
+
+    enum Item: Identifiable {
+        case message(ChatMessage)
+        case toolRun(id: String, pairs: [(call: ChatMessage, result: ChatMessage?)])
+        var id: String {
+            switch self {
+            case .message(let m): return m.id
+            case .toolRun(let id, _): return "run:\(id)"
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func itemRow(_ item: Item) -> some View {
+        switch item {
+        case .message(let m):
+            messageBubble(m)
+        case .toolRun(_, let pairs):
+            toolRunCard(pairs: pairs)
+        }
+    }
+
+    @ViewBuilder
+    private func messageBubble(_ msg: ChatMessage) -> some View {
+        switch msg.kind {
+        case .userText:
+            HStack {
+                Spacer(minLength: 40)
+                Text(msg.body)
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0),
+                        in: RoundedRectangle(cornerRadius: 14)
+                    )
+                    .textSelection(.enabled)
+            }
+        case .assistantText:
+            VStack(alignment: .leading, spacing: 4) {
+                Text(msg.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(msg.body)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        Color(.systemBackground),
+                        in: RoundedRectangle(cornerRadius: 14)
+                    )
+            }
+        case .meta:
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                Text(msg.body)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+        case .toolCall, .toolResult:
+            // Loose tool rows (no matching pair) — rare. Render as a
+            // single-line system note.
+            HStack(spacing: 6) {
+                Image(systemName: msg.kind == .toolCall ? "wrench.fill" : "checkmark.seal")
+                    .foregroundStyle(.secondary)
+                Text(msg.body)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private func toolRunCard(pairs: [(call: ChatMessage, result: ChatMessage?)]) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(pairs, id: \.call.id) { pair in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: iconFor(toolName: pair.call.title))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(pair.call.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(pair.call.body)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        if let detail = pair.call.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(3)
+                        }
+                        if let result = pair.result, !result.body.isEmpty {
+                            Text(result.body)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(result.isError ? .red : .secondary)
+                                .lineLimit(4)
+                                .padding(.top, 2)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .padding(.vertical, 4)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(pairs.count == 1 ? "Ran 1 command" : "Ran \(pairs.count) commands")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func iconFor(toolName: String) -> String {
+        switch toolName {
+        case "Read", "Glob", "Grep": return "doc.text.magnifyingglass"
+        case "Edit", "Write": return "pencil"
+        case "Bash": return "terminal"
+        case "WebFetch", "WebSearch": return "globe"
+        default: return "wrench"
+        }
+    }
+
+    // MARK: - Load
+
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        guard client.host != nil, client.token != nil else {
+            errorMessage = "Pair this iPhone with your Mac first (Settings → Sessions on the Mac)."
+            isLoading = false
+            return
+        }
+        let envelope = await client.fetchTranscript(path: jsonlPath)
+        isLoading = false
+        guard let envelope else {
+            errorMessage = "Couldn't reach the Mac daemon. Make sure Clawdmeter is running on your Mac and your Tailscale connection is healthy."
+            return
+        }
+        messages = envelope.messages
+        truncated = envelope.truncated
+    }
+}

@@ -11,10 +11,13 @@ private let registryLogger = Logger(subsystem: "com.clawdmeter.mac", category: "
 /// + JSONL tails (Phase 4) call `appendEvent(...)` / `updateStatus(...)`
 /// from background contexts via `Task { @MainActor in ... }`.
 ///
-/// Persists `sessions.json` schema v1 to `~/Library/Application Support/
-/// Clawdmeter/sessions.json` for restart resilience (Codex Round 2 High #5:
-/// atomic write via temp-file + rename + fsync; preserves unknown fields
-/// for forward compat).
+/// Persists `sessions.json` schema v3 to `~/Library/Application Support/
+/// Clawdmeter/sessions.json` for restart resilience.
+///
+/// Sessions v2 (T41 audit): every mutation goes through the single `with()`
+/// helper so new fields (`effort`, `abPairSessionId`, `abPairDecidedAt`)
+/// propagate automatically. Adding a new field is a one-line change here
+/// instead of N parallel constructor calls.
 @MainActor
 public final class AgentSessionRegistry: ObservableObject {
 
@@ -59,7 +62,9 @@ public final class AgentSessionRegistry: ObservableObject {
         tmuxPaneId: String?,
         planMode: Bool,
         mode: SessionMode = .local,
-        parentSessionId: UUID? = nil
+        parentSessionId: UUID? = nil,
+        effort: ReasoningEffort? = nil,
+        abPairSessionId: UUID? = nil
     ) -> AgentSession {
         let id = UUID()
         let now = Date()
@@ -80,7 +85,9 @@ public final class AgentSessionRegistry: ObservableObject {
             lastEventAt: now,
             lastEventSeq: 1,
             mode: mode,
-            parentSessionId: parentSessionId
+            parentSessionId: parentSessionId,
+            effort: effort,
+            abPairSessionId: abPairSessionId
         )
         sessions.append(session)
         save()
@@ -91,43 +98,22 @@ public final class AgentSessionRegistry: ObservableObject {
         sessions.first { $0.id == id }
     }
 
+    /// Per-session monotonic event seq counter. Used by AgentEventStream.
+    public func nextEventSeq(for sessionId: UUID) -> UInt64 {
+        let next = (nextEventSeqBySession[sessionId] ?? 0) + 1
+        nextEventSeqBySession[sessionId] = next
+        return next
+    }
+
     public func updateStatus(id: UUID, status: AgentSessionStatus) {
-        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let s = sessions[idx]
-        sessions[idx] = AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: s.worktreePath,
-            tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
-            status: status, planText: s.planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq + 1,
-            mode: s.mode, archivedAt: s.archivedAt,
-            terminalPanes: s.terminalPanes,
-            scheduledFollowUps: s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
-        )
-        nextEventSeqBySession[id] = (nextEventSeqBySession[id] ?? 1) + 1
-        save()
+        bumpEventSeq(id: id)
+        update(id: id) { s in
+            with(s, status: status, lastEventSeq: s.lastEventSeq + 1)
+        }
     }
 
     public func setPlanText(id: UUID, planText: String) {
-        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let s = sessions[idx]
-        sessions[idx] = AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: s.worktreePath,
-            tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
-            status: s.status, planText: planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq + 1,
-            mode: s.mode, archivedAt: s.archivedAt,
-            terminalPanes: s.terminalPanes,
-            scheduledFollowUps: s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
-        )
-        save()
+        update(id: id) { s in with(s, planText: planText) }
     }
 
     /// Update the in-place cwd/worktree metadata (used when the user switches
@@ -140,134 +126,203 @@ public final class AgentSessionRegistry: ObservableObject {
         tmuxPaneId: String?,
         mode: SessionMode
     ) {
-        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let s = sessions[idx]
-        sessions[idx] = AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: worktreePath,
-            tmuxWindowId: tmuxWindowId, tmuxPaneId: tmuxPaneId,
-            status: s.status, planText: s.planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq + 1,
-            mode: mode, archivedAt: s.archivedAt,
-            terminalPanes: s.terminalPanes,
-            scheduledFollowUps: s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
-        )
-        save()
+        update(id: id) { s in
+            with(
+                s,
+                worktreePath: worktreePath,
+                tmuxWindowId: tmuxWindowId,
+                tmuxPaneId: tmuxPaneId,
+                mode: mode
+            )
+        }
+    }
+
+    /// Sessions v2: swap model on a live session (Phase 0).
+    public func setModel(id: UUID, model: String, effort: ReasoningEffort?) {
+        update(id: id) { s in
+            with(s, model: model, effort: effort ?? s.effort)
+        }
+    }
+
+    /// Sessions v2: swap effort on a live session (Phase 0).
+    public func setEffort(id: UUID, effort: ReasoningEffort) {
+        update(id: id) { s in with(s, effort: effort) }
+    }
+
+    /// Sessions v2: change plan mode mid-session (status flips to planning).
+    public func setPlanMode(id: UUID, planMode: Bool) {
+        update(id: id) { s in
+            with(s, status: planMode ? .planning : .running)
+        }
     }
 
     /// Archive (hide from default sidebar). Reversible via `unarchive(id:)`.
+    /// If the session is one half of an A/B pair, the sibling's
+    /// `abPairSessionId` is cleared automatically per D16.
     public func archive(id: UUID, at date: Date = Date()) {
-        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let s = sessions[idx]
-        sessions[idx] = AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: s.worktreePath,
-            tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
-            status: s.status, planText: s.planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq + 1,
-            mode: s.mode, archivedAt: date,
-            terminalPanes: s.terminalPanes,
-            scheduledFollowUps: s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
-        )
-        save()
+        guard let s = session(id: id) else { return }
+        update(id: id) { s in with(s, archivedAt: date) }
+        // D16: promote sibling to standalone with banner.
+        if let siblingId = s.abPairSessionId {
+            update(id: siblingId) { sib in
+                with(sib, abPairSessionId: .some(nil))
+            }
+        }
     }
 
     public func unarchive(id: UUID) {
-        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let s = sessions[idx]
-        sessions[idx] = AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: s.worktreePath,
-            tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
-            status: s.status, planText: s.planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq + 1,
-            mode: s.mode, archivedAt: nil,
-            terminalPanes: s.terminalPanes,
-            scheduledFollowUps: s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
-        )
-        save()
+        update(id: id) { s in with(s, archivedAt: .some(nil)) }
+    }
+
+    // MARK: - A/B pair operations (Phase 7 + E3 atomic CAS)
+
+    /// Link two existing sessions as an A/B pair. Idempotent: re-linking
+    /// the same pair is a no-op.
+    public func linkABPair(_ a: UUID, _ b: UUID) {
+        update(id: a) { s in with(s, abPairSessionId: .some(b)) }
+        update(id: b) { s in with(s, abPairSessionId: .some(a)) }
+    }
+
+    /// Atomic compare-and-set on A/B pair winner-pick. Returns the resolved
+    /// decision (existing if already decided, new otherwise) or nil if the
+    /// session id is unknown.
+    ///
+    /// E3: first request locks `abPairDecidedAt`; subsequent requests see
+    /// the existing decision and the caller responds 409.
+    public func pickPairWinner(sessionId: UUID, winner: UUID, at when: Date = Date()) -> PickPairResult? {
+        guard let s = session(id: sessionId) else { return nil }
+        guard let siblingId = s.abPairSessionId else {
+            return .notPaired
+        }
+        // Validate that the winner is one of the pair members.
+        guard winner == sessionId || winner == siblingId else {
+            return .invalidWinner
+        }
+        // Check both members for an existing decision (whichever was hit first).
+        if let decidedAt = s.abPairDecidedAt {
+            // Already decided — return that decision.
+            return .alreadyDecided(winner: s.abPairSessionId == winner ? siblingId : sessionId, decidedAt: decidedAt)
+        }
+        if let sibling = session(id: siblingId), let decidedAt = sibling.abPairDecidedAt {
+            return .alreadyDecided(winner: sibling.abPairSessionId == winner ? sessionId : siblingId, decidedAt: decidedAt)
+        }
+        // First write wins: stamp both with the timestamp.
+        update(id: sessionId) { s in with(s, abPairDecidedAt: .some(when)) }
+        update(id: siblingId) { s in with(s, abPairDecidedAt: .some(when)) }
+        return .decided(winner: winner, decidedAt: when)
+    }
+
+    public enum PickPairResult: Sendable {
+        case decided(winner: UUID, decidedAt: Date)
+        case alreadyDecided(winner: UUID, decidedAt: Date)
+        case notPaired
+        case invalidWinner
     }
 
     // MARK: - G12 multi-terminal
 
     public func addTerminalPane(sessionId: UUID, pane: TerminalPaneRef) {
-        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        let s = sessions[idx]
-        var panes = s.terminalPanes
-        panes.append(pane)
-        sessions[idx] = with(s, terminalPanes: panes)
-        save()
+        update(id: sessionId) { s in
+            var panes = s.terminalPanes
+            panes.append(pane)
+            return with(s, terminalPanes: panes)
+        }
     }
 
     public func removeTerminalPane(sessionId: UUID, paneRefId: UUID) {
-        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        let s = sessions[idx]
-        let panes = s.terminalPanes.filter { $0.id != paneRefId }
-        sessions[idx] = with(s, terminalPanes: panes)
-        save()
+        update(id: sessionId) { s in
+            with(s, terminalPanes: s.terminalPanes.filter { $0.id != paneRefId })
+        }
     }
 
     // MARK: - G15 scheduled follow-ups
 
     public func addScheduledFollowUp(sessionId: UUID, followUp: ScheduledFollowUp) {
-        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        let s = sessions[idx]
-        var ups = s.scheduledFollowUps
-        ups.append(followUp)
-        sessions[idx] = with(s, scheduledFollowUps: ups)
-        save()
+        update(id: sessionId) { s in
+            with(s, scheduledFollowUps: s.scheduledFollowUps + [followUp])
+        }
     }
 
     public func removeScheduledFollowUp(sessionId: UUID, followUpId: UUID) {
-        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        let s = sessions[idx]
-        let ups = s.scheduledFollowUps.filter { $0.id != followUpId }
-        sessions[idx] = with(s, scheduledFollowUps: ups)
-        save()
+        update(id: sessionId) { s in
+            with(s, scheduledFollowUps: s.scheduledFollowUps.filter { $0.id != followUpId })
+        }
     }
 
     public func markFollowUpFired(sessionId: UUID, followUpId: UUID, at firedAt: Date = Date()) {
-        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
-        let s = sessions[idx]
-        let ups = s.scheduledFollowUps.map { f -> ScheduledFollowUp in
-            if f.id == followUpId {
-                return ScheduledFollowUp(id: f.id, fireAt: f.fireAt, prompt: f.prompt, firedAt: firedAt)
+        update(id: sessionId) { s in
+            let ups = s.scheduledFollowUps.map { f -> ScheduledFollowUp in
+                if f.id == followUpId {
+                    return ScheduledFollowUp(id: f.id, fireAt: f.fireAt, prompt: f.prompt, firedAt: firedAt)
+                }
+                return f
             }
-            return f
+            return with(s, scheduledFollowUps: ups)
         }
-        sessions[idx] = with(s, scheduledFollowUps: ups)
+    }
+
+    /// Mutate one session by id via a transform closure. Saves on every
+    /// successful mutation. Single source of truth for v3-field propagation
+    /// (T41 audit) — every public mutation goes through here, so adding a
+    /// new field is a one-line change to `with(...)` below.
+    private func update(id: UUID, _ transform: (AgentSession) -> AgentSession) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx] = transform(sessions[idx])
         save()
     }
 
+    private func bumpEventSeq(id: UUID) {
+        nextEventSeqBySession[id] = (nextEventSeqBySession[id] ?? 1) + 1
+    }
+
     /// Re-emit the AgentSession with a swapped field set, preserving the rest.
-    /// Bumps `lastEventAt`. Doesn't bump `lastEventSeq` because these are
-    /// local-state mutations, not cross-device events.
+    /// Bumps `lastEventAt`. Doesn't bump `lastEventSeq` unless caller passes
+    /// one explicitly (those are cross-device events; local-state mutations
+    /// like adding a pane don't need a new seq).
+    ///
+    /// Use `Optional<T>.some(nil)` to explicitly set a field to nil
+    /// (Swift's "I really mean nil, don't fall back to the existing value")
+    /// — e.g. `with(s, archivedAt: .some(nil))` to unarchive.
     private func with(
         _ s: AgentSession,
+        status: AgentSessionStatus? = nil,
+        model: String?? = nil,
+        planText: String?? = nil,
+        worktreePath: String?? = nil,
+        tmuxWindowId: String?? = nil,
+        tmuxPaneId: String?? = nil,
+        mode: SessionMode? = nil,
+        archivedAt: Date?? = nil,
         terminalPanes: [TerminalPaneRef]? = nil,
-        scheduledFollowUps: [ScheduledFollowUp]? = nil
+        scheduledFollowUps: [ScheduledFollowUp]? = nil,
+        effort: ReasoningEffort?? = nil,
+        abPairSessionId: UUID?? = nil,
+        abPairDecidedAt: Date?? = nil,
+        lastEventSeq: UInt64? = nil
     ) -> AgentSession {
         AgentSession(
-            id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
-            agent: s.agent, model: s.model, goal: s.goal,
-            worktreePath: s.worktreePath,
-            tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
-            status: s.status, planText: s.planText,
-            createdAt: s.createdAt, lastEventAt: Date(),
-            lastEventSeq: s.lastEventSeq,
-            mode: s.mode, archivedAt: s.archivedAt,
+            id: s.id,
+            repoKey: s.repoKey,
+            repoDisplayName: s.repoDisplayName,
+            agent: s.agent,
+            model: model.flatMap { $0 } ?? s.model,
+            goal: s.goal,
+            worktreePath: worktreePath.flatMap { $0 } ?? s.worktreePath,
+            tmuxWindowId: tmuxWindowId.flatMap { $0 } ?? s.tmuxWindowId,
+            tmuxPaneId: tmuxPaneId.flatMap { $0 } ?? s.tmuxPaneId,
+            status: status ?? s.status,
+            planText: planText.flatMap { $0 } ?? s.planText,
+            createdAt: s.createdAt,
+            lastEventAt: Date(),
+            lastEventSeq: lastEventSeq ?? s.lastEventSeq,
+            mode: mode ?? s.mode,
+            archivedAt: archivedAt.flatMap { $0 } ?? s.archivedAt,
             terminalPanes: terminalPanes ?? s.terminalPanes,
             scheduledFollowUps: scheduledFollowUps ?? s.scheduledFollowUps,
-            parentSessionId: s.parentSessionId
+            parentSessionId: s.parentSessionId,
+            effort: effort.flatMap { $0 } ?? s.effort,
+            abPairSessionId: abPairSessionId.flatMap { $0 } ?? s.abPairSessionId,
+            abPairDecidedAt: abPairDecidedAt.flatMap { $0 } ?? s.abPairDecidedAt
         )
     }
 
@@ -284,10 +339,11 @@ public final class AgentSessionRegistry: ObservableObject {
         var sessions: [AgentSession]
     }
 
-    /// Bumped to 2 in G2 (terminalPanes, scheduledFollowUps, parentSessionId
-    /// added to AgentSession). v1 files decode cleanly because the new keys
-    /// default to empty in `AgentSession.init(from:)`.
-    private static let currentSchemaVersion = 2
+    /// v3 (Sessions v2): adds optional `effort`, `abPairSessionId`,
+    /// `abPairDecidedAt` to AgentSession. v1/v2 files decode cleanly
+    /// because the new keys default to nil in `AgentSession.init(from:)`.
+    /// Downgrade path: a v2 reader silently drops these fields.
+    private static let currentSchemaVersion = 3
 
     private func load() {
         guard FileManager.default.fileExists(atPath: storeURL.path) else { return }

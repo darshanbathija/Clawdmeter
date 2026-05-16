@@ -11,6 +11,141 @@ import Foundation
 // Per E2: these DTOs are Sendable so they cross actor / NIO event loop
 // boundaries without copies tripping the type checker.
 
+// MARK: - Wire version (Sessions v2 E8)
+
+/// Single source of truth for the wire-protocol revision. Bumped in lockstep
+/// with breaking shape changes. v3 adds: `effort`, `abPairSessionId`,
+/// `abPairDecidedAt` on `AgentSession`; `ReasoningEffort` + `ModelCatalog`
+/// + mid-session change endpoints + `WireChatSnapshot` + `HealthResponse`.
+///
+/// iOS reads this on pair-test or session-list refresh and compares to its
+/// own constant. Mismatch surfaces a banner. New endpoints return HTTP 426.
+public enum AgentControlWireVersion {
+    public static let current: Int = 3
+}
+
+/// `GET /health` response. Old clients tolerate the extra fields; new
+/// clients consume `wireVersion` and `serverVersion`.
+public struct HealthResponse: Codable, Sendable {
+    public let ok: Bool
+    public let serverVersion: String
+    public let wireVersion: Int
+
+    public init(ok: Bool = true, serverVersion: String, wireVersion: Int = AgentControlWireVersion.current) {
+        self.ok = ok
+        self.serverVersion = serverVersion
+        self.wireVersion = wireVersion
+    }
+}
+
+// MARK: - Reasoning effort (CEO D11 / Sessions v2 Phase 0)
+
+/// Per-session reasoning / thinking effort level. Same enum drives Claude
+/// (`--effort`) and Codex (`-c model_reasoning_effort=`). UI shows it as a
+/// 5-segment dial (Min · Low · Med · High · xHigh).
+public enum ReasoningEffort: String, Codable, Hashable, Sendable, CaseIterable {
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+
+    /// Claude CLI flag value (`claude --effort <value>`, verified against
+    /// claude --help 2.1.141).
+    public var claudeFlagValue: String {
+        switch self {
+        case .minimal: return "low"   // claude CLI does not expose minimal — fold into low
+        case .low:     return "low"
+        case .medium:  return "medium"
+        case .high:    return "high"
+        case .xhigh:   return "xhigh"
+        }
+    }
+
+    /// Codex CLI config value (`codex -c model_reasoning_effort="<value>"`).
+    /// Codex exposes the same five levels via TOML override; codex CLI does
+    /// NOT have a `--reasoning-effort` flag, only this config-override path.
+    public var codexConfigValue: String {
+        rawValue
+    }
+}
+
+// MARK: - Model catalog (Sessions v2 Phase 0)
+
+/// One model the user can pick in the per-session model picker. Bundled
+/// into `ClawdmeterShared` and served by `GET /models`.
+public struct ModelCatalogEntry: Codable, Hashable, Sendable, Identifiable {
+    public let id: String                 // e.g. "claude-opus-4-7-1m", "gpt-5.5"
+    public let provider: AgentKind
+    public let displayName: String        // e.g. "Opus 4.7 1M"
+    public let cliAlias: String?          // claude CLI shorthand (opus / sonnet / haiku) when applicable
+    public let supportsThinking: Bool     // Claude extended-thinking capable
+    public let supportsEffort: Bool       // accepts a non-default effort level
+    public let contextWindow: Int?        // 1_000_000 for "1M" variants, else nil
+    public let recommendedFor: String?    // "Plan mode", "Fast iteration"
+    public let badge: String?             // "New", "1M", "Fast"
+
+    public init(
+        id: String,
+        provider: AgentKind,
+        displayName: String,
+        cliAlias: String? = nil,
+        supportsThinking: Bool = true,
+        supportsEffort: Bool = true,
+        contextWindow: Int? = nil,
+        recommendedFor: String? = nil,
+        badge: String? = nil
+    ) {
+        self.id = id
+        self.provider = provider
+        self.displayName = displayName
+        self.cliAlias = cliAlias
+        self.supportsThinking = supportsThinking
+        self.supportsEffort = supportsEffort
+        self.contextWindow = contextWindow
+        self.recommendedFor = recommendedFor
+        self.badge = badge
+    }
+}
+
+public struct ModelCatalog: Codable, Sendable {
+    public let claude: [ModelCatalogEntry]
+    public let codex: [ModelCatalogEntry]
+    public let updatedAt: Date
+
+    public init(claude: [ModelCatalogEntry], codex: [ModelCatalogEntry], updatedAt: Date) {
+        self.claude = claude
+        self.codex = codex
+        self.updatedAt = updatedAt
+    }
+
+    /// Bundled default catalog. Mirrors the user's Conductor screenshot:
+    /// Opus 4.7 / Opus 4.7 1M / Opus 4.6 1M / Sonnet 4.6 / Haiku 4.5 +
+    /// GPT-5.5 / GPT-5.4 / GPT-5.3-Codex-Spark / GPT-5.3-Codex / GPT-5.2-Codex.
+    public static let bundled = ModelCatalog(
+        claude: [
+            ModelCatalogEntry(id: "claude-opus-4-7-1m",        provider: .claude, displayName: "Opus 4.7 (1M)",   cliAlias: nil,      supportsThinking: true,  supportsEffort: true,  contextWindow: 1_000_000, recommendedFor: "Long tasks",     badge: "1M"),
+            ModelCatalogEntry(id: "claude-opus-4-7",           provider: .claude, displayName: "Opus 4.7",        cliAlias: "opus",   supportsThinking: true,  supportsEffort: true,  contextWindow: 200_000,   recommendedFor: "Most work",      badge: "New"),
+            ModelCatalogEntry(id: "claude-opus-4-6-1m",        provider: .claude, displayName: "Opus 4.6 (1M)",   cliAlias: nil,      supportsThinking: true,  supportsEffort: true,  contextWindow: 1_000_000, recommendedFor: nil,              badge: "1M"),
+            ModelCatalogEntry(id: "claude-sonnet-4-6",         provider: .claude, displayName: "Sonnet 4.6",      cliAlias: "sonnet", supportsThinking: true,  supportsEffort: true,  contextWindow: 200_000,   recommendedFor: "Plan mode",      badge: nil),
+            ModelCatalogEntry(id: "claude-haiku-4-5-20251001", provider: .claude, displayName: "Haiku 4.5",       cliAlias: "haiku",  supportsThinking: false, supportsEffort: false, contextWindow: 200_000,   recommendedFor: "PR titles",      badge: "Fast"),
+        ],
+        codex: [
+            ModelCatalogEntry(id: "gpt-5.5",             provider: .codex, displayName: "GPT-5.5",              cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: "Most work",      badge: "New"),
+            ModelCatalogEntry(id: "gpt-5.4",             provider: .codex, displayName: "GPT-5.4",              cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: nil,              badge: nil),
+            ModelCatalogEntry(id: "gpt-5.3-codex-spark", provider: .codex, displayName: "GPT-5.3 Codex Spark",  cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: "Fast iteration", badge: "Fast"),
+            ModelCatalogEntry(id: "gpt-5.3-codex",       provider: .codex, displayName: "GPT-5.3 Codex",        cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: nil,              badge: nil),
+            ModelCatalogEntry(id: "gpt-5.2-codex",       provider: .codex, displayName: "GPT-5.2 Codex",        cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: nil,              badge: nil),
+        ],
+        updatedAt: Date(timeIntervalSince1970: 1747353600) // 2026-05-15
+    )
+
+    /// Resolve a model id to a catalog entry across both providers.
+    public func entry(forId id: String) -> ModelCatalogEntry? {
+        claude.first(where: { $0.id == id }) ?? codex.first(where: { $0.id == id })
+    }
+}
+
 // MARK: - Repo + Session
 
 /// One session JSONL file that wasn't spawned by Clawdmeter but lived in a
@@ -251,6 +386,24 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
     /// parent session. Sidebar nests sub-rows under the parent.
     public let parentSessionId: UUID?
 
+    // MARK: - Sessions v2 schema v3 additions
+    //
+    // All three optional + decoder-tolerant so v2 sessions.json files
+    // decode cleanly. Downgrade path: v2 reader silently drops these
+    // fields — documented in CLAUDE.md.
+
+    /// Reasoning / thinking effort level requested at spawn (or after
+    /// mid-session swap). `nil` = CLI default.
+    public let effort: ReasoningEffort?
+    /// When this session is one half of an A/B agent pair, the id of the
+    /// sibling. Clearing this field (on archive of one sibling) promotes
+    /// the survivor to standalone with a banner per D16.
+    public let abPairSessionId: UUID?
+    /// Atomic CAS lock on A/B-pair winner-pick (E3). First request wins;
+    /// second request sees this populated and gets 409. `nil` until
+    /// someone picks a winner; cleared on un-pair.
+    public let abPairDecidedAt: Date?
+
     public init(
         id: UUID,
         repoKey: String,
@@ -270,7 +423,10 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         archivedAt: Date? = nil,
         terminalPanes: [TerminalPaneRef] = [],
         scheduledFollowUps: [ScheduledFollowUp] = [],
-        parentSessionId: UUID? = nil
+        parentSessionId: UUID? = nil,
+        effort: ReasoningEffort? = nil,
+        abPairSessionId: UUID? = nil,
+        abPairDecidedAt: Date? = nil
     ) {
         self.id = id
         self.repoKey = repoKey
@@ -291,6 +447,9 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         self.terminalPanes = terminalPanes
         self.scheduledFollowUps = scheduledFollowUps
         self.parentSessionId = parentSessionId
+        self.effort = effort
+        self.abPairSessionId = abPairSessionId
+        self.abPairDecidedAt = abPairDecidedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -319,6 +478,10 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         self.terminalPanes = (try? c.decodeIfPresent([TerminalPaneRef].self, forKey: .terminalPanes)) ?? []
         self.scheduledFollowUps = (try? c.decodeIfPresent([ScheduledFollowUp].self, forKey: .scheduledFollowUps)) ?? []
         self.parentSessionId = try c.decodeIfPresent(UUID.self, forKey: .parentSessionId)
+        // Schema v3 fields: optional + decoder-tolerant so v2 files decode.
+        self.effort = (try? c.decodeIfPresent(ReasoningEffort.self, forKey: .effort)) ?? nil
+        self.abPairSessionId = (try? c.decodeIfPresent(UUID.self, forKey: .abPairSessionId)) ?? nil
+        self.abPairDecidedAt = (try? c.decodeIfPresent(Date.self, forKey: .abPairDecidedAt)) ?? nil
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -326,7 +489,8 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
              worktreePath, tmuxWindowId, tmuxPaneId,
              status, planText, createdAt, lastEventAt, lastEventSeq,
              mode, archivedAt,
-             terminalPanes, scheduledFollowUps, parentSessionId
+             terminalPanes, scheduledFollowUps, parentSessionId,
+             effort, abPairSessionId, abPairDecidedAt
     }
 }
 
@@ -348,6 +512,12 @@ public struct NewSessionRequest: Codable, Sendable {
     public let useWorktree: Bool
     /// Base branch for the worktree. `nil` defaults to the repo's HEAD.
     public let baseBranch: String?
+    /// Per-session reasoning effort. `nil` = CLI default. Sessions v2 D3.
+    public let effort: ReasoningEffort?
+    /// If non-nil, spawn this session AND a sibling using `abPair` as the
+    /// second agent (the same goal/model/effort, in a sibling worktree).
+    /// Phase 7 dmux feature.
+    public let abPair: AgentKind?
 
     public init(
         repoKey: String,
@@ -356,7 +526,9 @@ public struct NewSessionRequest: Codable, Sendable {
         planMode: Bool = false,
         goal: String? = nil,
         useWorktree: Bool = false,
-        baseBranch: String? = nil
+        baseBranch: String? = nil,
+        effort: ReasoningEffort? = nil,
+        abPair: AgentKind? = nil
     ) {
         self.repoKey = repoKey
         self.agent = agent
@@ -365,6 +537,320 @@ public struct NewSessionRequest: Codable, Sendable {
         self.goal = goal
         self.useWorktree = useWorktree
         self.baseBranch = baseBranch
+        self.effort = effort
+        self.abPair = abPair
+    }
+
+    // Custom decoder to tolerate v2 requests missing the new fields.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.repoKey = try c.decode(String.self, forKey: .repoKey)
+        self.agent = try c.decode(AgentKind.self, forKey: .agent)
+        self.model = try c.decodeIfPresent(String.self, forKey: .model)
+        self.planMode = (try? c.decode(Bool.self, forKey: .planMode)) ?? false
+        self.goal = try c.decodeIfPresent(String.self, forKey: .goal)
+        self.useWorktree = (try? c.decode(Bool.self, forKey: .useWorktree)) ?? false
+        self.baseBranch = try c.decodeIfPresent(String.self, forKey: .baseBranch)
+        self.effort = try c.decodeIfPresent(ReasoningEffort.self, forKey: .effort)
+        self.abPair = try c.decodeIfPresent(AgentKind.self, forKey: .abPair)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case repoKey, agent, model, planMode, goal, useWorktree, baseBranch, effort, abPair
+    }
+}
+
+// MARK: - Mid-session change requests (Sessions v2 Phase 0)
+
+/// `POST /sessions/:id/model` body. Mid-session model swap.
+public struct ChangeModelRequest: Codable, Sendable {
+    public let model: String
+    /// Optional new effort to apply together with the model swap. If nil,
+    /// existing effort is preserved.
+    public let effort: ReasoningEffort?
+
+    public init(model: String, effort: ReasoningEffort? = nil) {
+        self.model = model
+        self.effort = effort
+    }
+}
+
+/// `POST /sessions/:id/mode` body. Mid-session mode change (local/worktree;
+/// `.cloud` rejected with 400). Optional plan-mode flip alongside.
+public struct ChangeModeRequest: Codable, Sendable {
+    public let mode: SessionMode
+    /// Claude-only. Ignored for Codex.
+    public let planMode: Bool?
+
+    public init(mode: SessionMode, planMode: Bool? = nil) {
+        self.mode = mode
+        self.planMode = planMode
+    }
+}
+
+/// `POST /sessions/:id/effort` body. Effort-only swap (cheaper than model
+/// swap; still triggers respawn).
+public struct ChangeEffortRequest: Codable, Sendable {
+    public let effort: ReasoningEffort
+
+    public init(effort: ReasoningEffort) {
+        self.effort = effort
+    }
+}
+
+/// `POST /sessions/:id/send` body. Inject a prompt into the running agent's
+/// tmux pane. >256 bytes uses paste-buffer; otherwise send-keys.
+public struct SendPromptRequest: Codable, Sendable {
+    public let text: String
+    /// If true, the daemon writes to tmux paste-buffer + pastes (good for
+    /// multi-line / IME / large content). If false, plain send-keys.
+    public let asFollowUp: Bool
+
+    public init(text: String, asFollowUp: Bool = true) {
+        self.text = text
+        self.asFollowUp = asFollowUp
+    }
+}
+
+/// `POST /sessions/:id/autopilot` body. NO re-auth (D14). Each toggle
+/// writes an audit log entry. Per E7: enabling adds 15-min inactivity
+/// timeout + per-repo trust list + red banner across surfaces.
+public struct AutopilotRequest: Codable, Sendable {
+    public let enabled: Bool
+
+    public init(enabled: Bool) {
+        self.enabled = enabled
+    }
+}
+
+/// `POST /sessions/:id/ab-pair/pick-winner` body + response. Atomic CAS
+/// via daemon (E3): first request locks `abPairDecidedAt`; second returns
+/// 409 with the winning sibling id.
+public struct PickWinnerRequest: Codable, Sendable {
+    public let winnerSessionId: UUID
+
+    public init(winnerSessionId: UUID) {
+        self.winnerSessionId = winnerSessionId
+    }
+}
+
+/// Returned on 409 from pick-winner when the pair is already decided.
+public struct PickWinnerConflictResponse: Codable, Sendable {
+    public let alreadyDecided: Bool
+    public let winnerSessionId: UUID
+    public let decidedAt: Date
+
+    public init(winnerSessionId: UUID, decidedAt: Date) {
+        self.alreadyDecided = true
+        self.winnerSessionId = winnerSessionId
+        self.decidedAt = decidedAt
+    }
+}
+
+// MARK: - PR + Diff DTOs (Sessions v2 Phase 4)
+
+/// `GET /sessions/:id/pr` response. nil = no PR yet (offer Create).
+public struct PRStatus: Codable, Sendable {
+    public enum State: String, Codable, Sendable {
+        case open, merged, closed, draft
+    }
+
+    public let url: String
+    public let number: Int
+    public let title: String
+    public let body: String
+    public let state: State
+    public let additions: Int
+    public let deletions: Int
+    public let changedFiles: Int
+    /// Approve / request-changes / pending / null. From `gh pr view --json`.
+    public let reviewDecision: String?
+    /// CI checks rolled up: "success" / "pending" / "failure" / null.
+    public let checksRollup: String?
+
+    public init(
+        url: String,
+        number: Int,
+        title: String,
+        body: String,
+        state: State,
+        additions: Int = 0,
+        deletions: Int = 0,
+        changedFiles: Int = 0,
+        reviewDecision: String? = nil,
+        checksRollup: String? = nil
+    ) {
+        self.url = url
+        self.number = number
+        self.title = title
+        self.body = body
+        self.state = state
+        self.additions = additions
+        self.deletions = deletions
+        self.changedFiles = changedFiles
+        self.reviewDecision = reviewDecision
+        self.checksRollup = checksRollup
+    }
+}
+
+public struct CreatePRRequest: Codable, Sendable {
+    public let title: String?       // nil = AI-generate via Haiku 4.5
+    public let body: String?        // nil = AI-generate
+    public let baseBranch: String?  // nil = repo default
+
+    public init(title: String? = nil, body: String? = nil, baseBranch: String? = nil) {
+        self.title = title
+        self.body = body
+        self.baseBranch = baseBranch
+    }
+}
+
+/// One file's diff. `hunks` may be empty when the file is too large to
+/// inline; the iOS view shows "see full" CTA.
+public struct GitDiffFile: Codable, Sendable, Identifiable {
+    public var id: String { path }
+    public let path: String
+    public let oldPath: String?     // present on renames
+    public let status: String       // "A" / "M" / "D" / "R" / "C"
+    public let additions: Int
+    public let deletions: Int
+    public let hunks: [GitDiffHunk]
+    public let truncated: Bool
+
+    public init(
+        path: String,
+        oldPath: String? = nil,
+        status: String,
+        additions: Int,
+        deletions: Int,
+        hunks: [GitDiffHunk] = [],
+        truncated: Bool = false
+    ) {
+        self.path = path
+        self.oldPath = oldPath
+        self.status = status
+        self.additions = additions
+        self.deletions = deletions
+        self.hunks = hunks
+        self.truncated = truncated
+    }
+}
+
+public struct GitDiffHunk: Codable, Sendable {
+    public let header: String       // @@ -a,b +c,d @@
+    public let lines: [Line]
+
+    public struct Line: Codable, Sendable {
+        public enum Kind: String, Codable, Sendable { case context, addition, deletion }
+        public let kind: Kind
+        public let text: String
+        public init(kind: Kind, text: String) {
+            self.kind = kind
+            self.text = text
+        }
+    }
+
+    public init(header: String, lines: [Line]) {
+        self.header = header
+        self.lines = lines
+    }
+}
+
+// MARK: - Preflight cost + rate-limit gate (Phase 8 / D3)
+
+public struct PreflightQuery: Codable, Sendable {
+    public let repoKey: String
+    public let agent: AgentKind
+    public let model: String
+    public let effort: ReasoningEffort?
+    public let goalLength: Int      // characters, for token-count estimate
+
+    public init(repoKey: String, agent: AgentKind, model: String, effort: ReasoningEffort?, goalLength: Int) {
+        self.repoKey = repoKey
+        self.agent = agent
+        self.model = model
+        self.effort = effort
+        self.goalLength = goalLength
+    }
+}
+
+public struct PreflightResponse: Codable, Sendable {
+    /// Estimated USD cost for the session. Best-effort from past sessions
+    /// of the same model on this repo. nil if no history.
+    public let estimatedCostUSD: Double?
+    /// Estimated weekly-cap consumption percentage (0.0–1.0). nil if data
+    /// is missing or stale.
+    public let weeklyCapPct: Double?
+    /// True when this session at this model/effort would push weekly usage
+    /// over the cap. UI shows the soft-warn banner (D11).
+    public let wouldCap: Bool
+    /// Suggested alternative model id when wouldCap == true. nil otherwise.
+    public let suggestedSwap: String?
+    /// True when the underlying usage snapshot is older than 1 hour.
+    public let staleData: Bool
+
+    public init(
+        estimatedCostUSD: Double? = nil,
+        weeklyCapPct: Double? = nil,
+        wouldCap: Bool = false,
+        suggestedSwap: String? = nil,
+        staleData: Bool = false
+    ) {
+        self.estimatedCostUSD = estimatedCostUSD
+        self.weeklyCapPct = weeklyCapPct
+        self.wouldCap = wouldCap
+        self.suggestedSwap = suggestedSwap
+        self.staleData = staleData
+    }
+}
+
+// MARK: - Wire chat snapshot (F2/F8 from main-reconciliation)
+
+/// Cross-platform mirror of the Mac-side `SessionChatStore.ChatSnapshot`.
+/// Reuses `ChatItem`, `PlanStep`, `SourceEntry`, `ArtifactEntry` (all
+/// already in Shared via `ChatItemBuilder.swift`).
+///
+/// Wire path: `GET /sessions/:id/chat-snapshot[?since=<updateCounter>]`
+/// returns the latest snapshot. WS subscription with envelope
+/// `{op: "chat-snapshot", sessionId: <UUID>}` pushes deltas keyed on
+/// `updateCounter` (monotonic per session).
+public struct WireChatSnapshot: Codable, Sendable, Hashable {
+    public let sessionId: UUID
+    public let items: [ChatItem]
+    public let planSteps: [PlanStep]
+    public let sourceEntries: [SourceEntry]
+    public let artifactEntries: [ArtifactEntry]
+    public let totalInputTokens: Int
+    public let totalOutputTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
+    public let lastEventAt: Date?
+    public let updateCounter: UInt64
+
+    public init(
+        sessionId: UUID,
+        items: [ChatItem],
+        planSteps: [PlanStep],
+        sourceEntries: [SourceEntry],
+        artifactEntries: [ArtifactEntry],
+        totalInputTokens: Int,
+        totalOutputTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheCreationTokens: Int = 0,
+        lastEventAt: Date?,
+        updateCounter: UInt64
+    ) {
+        self.sessionId = sessionId
+        self.items = items
+        self.planSteps = planSteps
+        self.sourceEntries = sourceEntries
+        self.artifactEntries = artifactEntries
+        self.totalInputTokens = totalInputTokens
+        self.totalOutputTokens = totalOutputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.lastEventAt = lastEventAt
+        self.updateCounter = updateCounter
     }
 }
 
@@ -570,5 +1056,30 @@ public struct TerminalResize: Codable, Sendable {
     public init(cols: Int, rows: Int) {
         self.cols = cols
         self.rows = rows
+    }
+}
+
+// MARK: - Transcript
+
+/// Response shape for `GET /transcript?path=<jsonl>`. Lets the iOS client
+/// render the actual chat for any read-only outside-Clawdmeter session
+/// (Conductor / Cursor / Terminal-launched agent) AND the live transcript
+/// for a Clawdmeter-spawned session. The chat content is the same
+/// `ChatMessage` shape the Mac uses in `SessionChatStore.snapshot.items`
+/// after flattening tool runs — keeping the wire shape simple and the
+/// iOS renderer minimal.
+public struct TranscriptEnvelope: Codable, Sendable {
+    /// Absolute path of the JSONL on the Mac (echoed back for sanity).
+    public let path: String
+    /// Chronologically sorted messages (oldest first). Capped at the
+    /// limit the client requested; `truncated == true` means earlier
+    /// messages exist on disk but weren't shipped.
+    public let messages: [ChatMessage]
+    public let truncated: Bool
+
+    public init(path: String, messages: [ChatMessage], truncated: Bool) {
+        self.path = path
+        self.messages = messages
+        self.truncated = truncated
     }
 }

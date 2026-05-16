@@ -219,6 +219,36 @@ public final class AgentControlClient: ObservableObject {
             return []
         }
     }
+
+    /// Fetch the parsed chat transcript for a JSONL at `path`. Used by
+    /// the iOS session detail screens so they can render the actual
+    /// conversation instead of a useless "Read-only · JSONL path · Last
+    /// write" stub. The Mac daemon parses the JSONL with the same
+    /// pipeline `SessionChatStore` uses live, so the rendered messages
+    /// match what the Mac shows.
+    public func fetchTranscript(path: String, limit: Int = 500) async -> TranscriptEnvelope? {
+        guard var components = URLComponents(string: "/transcript") else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "path", value: path),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+        ]
+        guard let query = components.url?.absoluteString,
+              let request = makeRequest(path: query)
+        else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                clientLogger.warning("transcript fetch HTTP \(http.statusCode) for \(path)")
+                return nil
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(TranscriptEnvelope.self, from: data)
+        } catch {
+            clientLogger.warning("transcript fetch failed for \(path): \(error.localizedDescription)")
+            return nil
+        }
+    }
 }
 
 private extension Int {

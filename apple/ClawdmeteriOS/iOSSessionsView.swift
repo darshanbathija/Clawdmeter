@@ -305,43 +305,60 @@ private struct OutsideSessionDetailView: View {
     let recent: RecentSession
     let repo: AgentRepo
     @ObservedObject var client: AgentControlClient
+    @State private var showingPathInfo: Bool = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 6) {
-                    Circle().fill(.green).frame(width: 8, height: 8)
-                    Text("\(repo.displayName) · \(recent.provider == .claude ? "Claude" : "Codex")")
-                        .font(.headline)
-                    Spacer()
-                    Text("Read-only")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.green.opacity(0.15), in: Capsule())
-                        .foregroundStyle(.green)
-                }
-                Text("This session was started outside Clawdmeter (Conductor, Cursor, or a Terminal-launched agent). The full transcript is on your Mac — Clawdmeter can't drive these sessions over Tailscale yet.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Divider()
-                LabeledContent("JSONL path") {
-                    Text(recent.path)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .truncationMode(.middle)
-                }
-                LabeledContent("Last write") {
-                    Text(recent.lastModified, style: .relative)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-        }
+        // Show the actual chat. The previous body showed only a "Read-only"
+        // pill + JSONL path + last write — useless. The new body fetches
+        // the parsed transcript from the Mac daemon's `/transcript`
+        // endpoint and renders it the same way the Mac chat view does.
+        iOSChatTranscriptView(
+            jsonlPath: recent.path,
+            banner: .readOnlyOutside,
+            client: client
+        )
         .navigationTitle(repo.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showingPathInfo = true } label: {
+                    Image(systemName: "info.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showingPathInfo) {
+            NavigationStack {
+                Form {
+                    Section("Session") {
+                        LabeledContent("Repo") { Text(repo.displayName) }
+                        LabeledContent("Provider") {
+                            Text(recent.provider == .claude ? "Claude" : "Codex")
+                        }
+                        LabeledContent("Last write") {
+                            Text(recent.lastModified, style: .relative)
+                        }
+                    }
+                    Section {
+                        Text(recent.path)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    } header: {
+                        Text("JSONL path on Mac")
+                    } footer: {
+                        Text("Tap-and-hold to copy. Clawdmeter reads this file from your Mac over Tailscale; it's not transferred to the iPhone.")
+                    }
+                }
+                .navigationTitle("Session info")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showingPathInfo = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
     }
 }
 

@@ -171,16 +171,63 @@ public actor ShellRunner {
 
     /// Probe the filesystem for a known binary at one of the standard paths.
     /// Used at startup so we don't re-resolve on every call.
+    ///
+    /// Resolution order (first match wins):
+    /// 1. UserDefaults override at `clawdmeter.binaries.<name>` (Settings → Diagnostics)
+    /// 2. Environment override at `CLAWDMETER_BIN_<NAME_UPPERCASED>`
+    /// 3. Known candidate paths (Homebrew, system, user local)
+    /// 4. `which <name>` via PATH
+    ///
+    /// Replaces the previous hardcoded `/Users/darshanbathija_1/.local/bin/claude`
+    /// pattern that broke for other users (T2 in Sessions v2 plan).
     nonisolated public static func locateBinary(_ name: String) -> String? {
+        // 1. UserDefaults override (Settings → Diagnostics fallback path).
+        let overrideKey = "clawdmeter.binaries.\(name)"
+        if let override = UserDefaults.standard.string(forKey: overrideKey),
+           !override.isEmpty,
+           FileManager.default.isExecutableFile(atPath: override) {
+            return override
+        }
+        // 2. Environment override.
+        let envKey = "CLAWDMETER_BIN_\(name.uppercased())"
+        if let envOverride = ProcessInfo.processInfo.environment[envKey],
+           !envOverride.isEmpty,
+           FileManager.default.isExecutableFile(atPath: envOverride) {
+            return envOverride
+        }
+        // 3. Known candidate paths.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
-            "/opt/homebrew/bin/\(name)",   // Apple Silicon Homebrew (default)
-            "/usr/local/bin/\(name)",      // Intel Homebrew / legacy
-            "/usr/bin/\(name)",            // system
+            "\(home)/.local/bin/\(name)",   // Claude Code's user install (claude)
+            "/opt/homebrew/bin/\(name)",    // Apple Silicon Homebrew (default for codex, gh, git)
+            "/usr/local/bin/\(name)",       // Intel Homebrew / legacy
+            "\(home)/.claude/local/\(name)",// alternate Claude install location
+            "/usr/bin/\(name)",             // system
         ]
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) {
                 return path
             }
+        }
+        // 4. `which` via PATH — last resort.
+        let which = Process()
+        which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        which.arguments = [name]
+        let pipe = Pipe()
+        which.standardOutput = pipe
+        which.standardError = Pipe()
+        do {
+            try which.run()
+            which.waitUntilExit()
+            if which.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !path.isEmpty && FileManager.default.isExecutableFile(atPath: path) {
+                    return path
+                }
+            }
+        } catch {
+            // best-effort; fall through to nil
         }
         return nil
     }

@@ -515,8 +515,66 @@ public final class AgentControlServer {
             await handleGetNeedsAttention(connection: connection)
         case ("GET", "/health"):
             sendJSON(["ok": true], on: connection)
+        case ("GET", let path) where path.hasPrefix("/transcript"):
+            handleGetTranscript(path: path, connection: connection)
         default:
             sendResponse(.notFound, on: connection)
+        }
+    }
+
+    // MARK: - Transcript endpoint
+
+    /// Parse a JSONL on the Mac and return its chat messages as JSON so
+    /// the iPhone can render the actual conversation instead of just a
+    /// JSONL path + last-write timestamp. Security: the path must live
+    /// under `~/.claude/projects/` or `~/.codex/sessions/` — anything
+    /// else returns 401 so a paired-but-malicious iPhone can't read
+    /// arbitrary Mac files via the daemon.
+    private func handleGetTranscript(path queryPath: String, connection: NWConnection) {
+        guard let queryStart = queryPath.firstIndex(of: "?") else {
+            sendResponse(.notFound, on: connection)
+            return
+        }
+        let query = String(queryPath[queryPath.index(after: queryStart)...])
+        var jsonlPath: String?
+        var maxMessages = 500
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            guard kv.count == 2 else { continue }
+            let value = kv[1].removingPercentEncoding ?? kv[1]
+            switch kv[0] {
+            case "path": jsonlPath = value
+            case "limit": maxMessages = max(1, min(2000, Int(value) ?? 500))
+            default: break
+            }
+        }
+        guard let jsonlPath else {
+            sendResponse(.notFound, on: connection)
+            return
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let allowedPrefixes = [
+            home + "/.claude/projects/",
+            home + "/.codex/sessions/",
+        ]
+        guard allowedPrefixes.contains(where: { jsonlPath.hasPrefix($0) }) else {
+            serverLogger.warning("transcript: refusing read outside allow-list — \(jsonlPath, privacy: .public)")
+            sendResponse(.unauthorized, on: connection)
+            return
+        }
+        let url = URL(fileURLWithPath: jsonlPath)
+        let messages = TranscriptLoader.load(from: url, maxMessages: maxMessages)
+        let envelope = TranscriptEnvelope(
+            path: jsonlPath,
+            messages: messages,
+            truncated: messages.count >= maxMessages
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let body = try? encoder.encode(envelope) {
+            sendResponse(.ok(contentType: "application/json", body: body), on: connection)
+        } else {
+            sendResponse(.internalError, on: connection)
         }
     }
 

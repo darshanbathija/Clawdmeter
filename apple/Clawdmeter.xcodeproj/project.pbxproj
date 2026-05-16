@@ -15,6 +15,7 @@
 		10652EDE40F510A21A2E7FA1 /* WatchUsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81AA8A300E81E7510331C1B /* WatchUsageModel.swift */; };
 		11BA8BA021A2FF248DDE4965 /* ModePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B1DE3BECFAB2F957716D01F /* ModePicker.swift */; };
 		16AAD267657983FF56851AD3 /* NotificationDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4AA299B141BD4D1652F66B /* NotificationDispatcher.swift */; };
+		16AB4E8CAA158331388F8D49 /* iOSChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FFD773AEE49A46B5312F /* iOSChatTranscriptView.swift */; };
 		1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */; };
 		1B8462EC849A8650EF81C300 /* ClawdmeteriOSWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8D2932E5B049F7DE99D05C44 /* ClawdmeteriOSWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1CF7ABBB2B878047BE44F411 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0273529FD22962799981CE40 /* DashboardView.swift */; };
@@ -81,6 +82,7 @@
 		CDE7A1BA0C782C1DC9C5CCAD /* DoneDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53B364B4BB9E6F7F3F9C8DC /* DoneDetector.swift */; };
 		D64E0EA5E4866E7E56001DE4 /* MenuBarGaugeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1C225091C6434AB97D2E8 /* MenuBarGaugeView.swift */; };
 		D89B4592E0A3C71E668ED91F /* UsageQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E844E6256A865A0DFEEF18 /* UsageQueryService.swift */; };
+		D9D0C23F96A52B7F41CBD04F /* TranscriptLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112147989D4BC1A47AD29F81 /* TranscriptLoader.swift */; };
 		DCA8543E3CD0D2378D6C6BC3 /* PseudoTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 985A7892D8BD9DC9E3227E5F /* PseudoTerminal.swift */; };
 		E12B14B2458C468678246859 /* ClawdmeterShared in Frameworks */ = {isa = PBXBuildFile; productRef = E5841B9F5A902887629FD6BF /* ClawdmeterShared */; };
 		E4CD6841EFEBD563297221FF /* SourcesPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C446A0B7936EDEA144F30E /* SourcesPane.swift */; };
@@ -166,6 +168,7 @@
 		0A4AA299B141BD4D1652F66B /* NotificationDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationDispatcher.swift; sourceTree = "<group>"; };
 		0DC8BB0C1C1A62C078E0C226 /* iOSNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSNotificationManager.swift; sourceTree = "<group>"; };
 		0DFF52BE1A5139A35BB3299F /* PlanWaitingComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWaitingComplication.swift; sourceTree = "<group>"; };
+		112147989D4BC1A47AD29F81 /* TranscriptLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptLoader.swift; sourceTree = "<group>"; };
 		12661A9455392080A33FC23C /* PRMirror.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRMirror.swift; sourceTree = "<group>"; };
 		131AD66B762768C8E5DD2D57 /* TerminalWebSocketChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWebSocketChannel.swift; sourceTree = "<group>"; };
 		1362703230C869345B8AF6F7 /* PopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverView.swift; sourceTree = "<group>"; };
@@ -185,6 +188,7 @@
 		44F439E06FC6F2C86BB0E8A9 /* ClawdmeterWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ClawdmeterWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		49F781A75D25FE8478D4F1E4 /* PairingScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScannerView.swift; sourceTree = "<group>"; };
 		4FA0A2EA3B5F097F12B28E4B /* WSChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WSChannel.swift; sourceTree = "<group>"; };
+		5122FFD773AEE49A46B5312F /* iOSChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSChatTranscriptView.swift; sourceTree = "<group>"; };
 		52CF286759B2554561F8379A /* ArtifactsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactsPane.swift; sourceTree = "<group>"; };
 		59E7B70E400451C1AF93243A /* TmuxSupervisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxSupervisor.swift; sourceTree = "<group>"; };
 		5B1DE3BECFAB2F957716D01F /* ModePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModePicker.swift; sourceTree = "<group>"; };
@@ -327,6 +331,7 @@
 				131AD66B762768C8E5DD2D57 /* TerminalWebSocketChannel.swift */,
 				840350A245B7AFF9FC1014B3 /* TmuxControlClient.swift */,
 				59E7B70E400451C1AF93243A /* TmuxSupervisor.swift */,
+				112147989D4BC1A47AD29F81 /* TranscriptLoader.swift */,
 				2E29211E150FD6B84E379166 /* WorktreeManager.swift */,
 				4FA0A2EA3B5F097F12B28E4B /* WSChannel.swift */,
 			);
@@ -434,6 +439,7 @@
 				FFCD9574C1A626280070D394 /* ClawdmeteriOSApp.swift */,
 				DE0C409B82A2CE3CC4741248 /* ContentView.swift */,
 				3251068D3CA064D454B38424 /* iOSAnalyticsView.swift */,
+				5122FFD773AEE49A46B5312F /* iOSChatTranscriptView.swift */,
 				0DC8BB0C1C1A62C078E0C226 /* iOSNotificationManager.swift */,
 				E6168C5A5642A5E8A8A0DC87 /* iOSSessionsView.swift */,
 				A27CA03750EC59D41E11FB18 /* iOSTerminalView.swift */,
@@ -766,6 +772,7 @@
 				29AF2BC82FD6FA5660BA400E /* TerminalWebSocketChannel.swift in Sources */,
 				5384D9EEF60C3B3DC9796E4D /* TmuxControlClient.swift in Sources */,
 				C55D2AA0FD68B4E634FDB248 /* TmuxSupervisor.swift in Sources */,
+				D9D0C23F96A52B7F41CBD04F /* TranscriptLoader.swift in Sources */,
 				D89B4592E0A3C71E668ED91F /* UsageQueryService.swift in Sources */,
 				490356C50E6D9478834E1622 /* WSChannel.swift in Sources */,
 				4F080AADD46A264ED2A23C23 /* WorktreeManager.swift in Sources */,
@@ -784,6 +791,7 @@
 				F4C4D33C87EA884DB52B4654 /* UsageModel.swift in Sources */,
 				C68868609D0C38964A8120CE /* WatchPlanBridgeIOS.swift in Sources */,
 				FDA4DA08AC6EDA799D95484D /* iOSAnalyticsView.swift in Sources */,
+				16AB4E8CAA158331388F8D49 /* iOSChatTranscriptView.swift in Sources */,
 				C607EE2525C880581434D54E /* iOSNotificationManager.swift in Sources */,
 				775AA876C3C1A1E5BADE7ECB /* iOSSessionsView.swift in Sources */,
 				717F946EC17A0E83AFF05B9D /* iOSTerminalView.swift in Sources */,
@@ -882,7 +890,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1117,7 +1125,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
