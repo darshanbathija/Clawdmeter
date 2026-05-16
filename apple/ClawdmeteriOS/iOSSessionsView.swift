@@ -74,21 +74,14 @@ struct iOSSessionsView: View {
                 .foregroundStyle(terraCotta)
             Text("Pair to Mac")
                 .font(.title2.bold())
-            Text("Open Clawdmeter on your Mac, click Settings → Sessions, and scan the QR.")
+            Text("Open Clawdmeter on your Mac and tap **Sync with iPhone** in the header — either scan the QR, or paste the copied URL.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
-            Button {
-                showingPairing = true
-            } label: {
-                Label("Scan QR", systemImage: "qrcode")
-                    .font(.headline)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(terraCotta)
+            PairingCTAButtons(client: client)
+                .padding(.horizontal, 28)
+                .padding(.top, 4)
         }
         .padding(28)
     }
@@ -365,12 +358,38 @@ private struct OutsideSessionDetailView: View {
 private struct SessionDetailView: View {
     let session: AgentSession
     @ObservedObject var client: AgentControlClient
-    @State private var viewMode: ViewMode = .structured
+    @State private var viewMode: ViewMode = .chat
+    /// Sessions v2 T40: chat store mirrors the daemon's chat snapshot.
+    @StateObject private var chatStore: iOSChatStore
 
-    enum ViewMode: String, CaseIterable { case structured = "Structured", terminal = "Terminal" }
+    init(session: AgentSession, client: AgentControlClient) {
+        self.session = session
+        self.client = client
+        _chatStore = StateObject(
+            wrappedValue: iOSChatStoreCache.shared.store(for: session.id, client: client)
+        )
+    }
+
+    /// Phase 4: 5-tab view structure (Chat / Plan / Diff / PR / Terminal).
+    /// Chat is the default; Plan auto-promotes when planText is non-nil.
+    enum ViewMode: String, CaseIterable {
+        case chat     = "Chat"
+        case plan     = "Plan"
+        case diff     = "Diff"
+        case pr       = "PR"
+        case terminal = "Terminal"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            // Sessions v2 T39: activity strip (per-agent indicator, duration, tokens, cost).
+            iOSSessionActivityStrip(session: session, chatStore: chatStore)
+            Divider()
+
+            // Sessions v2 Phase 3: control strip (model/effort/plan-code/interrupt).
+            iOSSessionControlsStrip(session: session, client: client)
+            Divider()
+
             Picker("View", selection: $viewMode) {
                 ForEach(ViewMode.allCases, id: \.self) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -383,17 +402,38 @@ private struct SessionDetailView: View {
             Divider()
 
             switch viewMode {
-            case .structured:
+            case .chat:
                 structuredView
+            case .plan:
+                iOSPlanTrackerView(session: session)
+            case .diff:
+                iOSDiffView(session: session, client: client)
+            case .pr:
+                iOSPRPane(session: session, client: client)
             case .terminal:
                 terminalView
             }
         }
         .navigationTitle(session.repoDisplayName)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { iOSChatStoreCache.shared.protectSession(session.id) }
+        .onDisappear { iOSChatStoreCache.shared.unprotectSession(session.id) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if session.archivedAt == nil {
+                        Button("Archive session") {
+                            Task { await client.archiveSession(id: session.id) }
+                        }
+                    } else {
+                        Button("Unarchive session") {
+                            Task { await client.unarchiveSession(id: session.id) }
+                        }
+                    }
+                    Button("Toggle autopilot") {
+                        Task { await client.setAutopilot(sessionId: session.id, enabled: true) }
+                    }
+                    Divider()
                     Button("Delete session", role: .destructive) {
                         Task { await client.deleteSession(id: session.id) }
                     }
@@ -441,9 +481,14 @@ private struct SessionDetailView: View {
     }
 }
 
-private struct PairingFlow: View {
+struct PairingFlow: View {
     @ObservedObject var client: AgentControlClient
     @Binding var isPresented: Bool
+
+    /// Allows callers to open the sheet pre-targeted to "Paste URL" so a
+    /// dedicated Paste-URL CTA in an empty state can skip the segmented
+    /// control. Defaults to `.scan` to preserve the original behavior.
+    var initialMode: PairingMode = .scan
 
     @State private var mode: PairingMode = .scan
     @State private var pastedURL: String = ""
@@ -483,6 +528,7 @@ private struct PairingFlow: View {
                     Button("Cancel") { isPresented = false }
                 }
             }
+            .onAppear { mode = initialMode }
         }
     }
 

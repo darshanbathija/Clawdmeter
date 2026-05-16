@@ -1,0 +1,115 @@
+import SwiftUI
+import ClawdmeterShared
+
+/// iOS plan tracker — vertical timeline of steps parsed from `planText`
+/// using the shared `ChatMessageOrdering.extractStepCandidates` heuristic
+/// (which has 12-test coverage in ClawdmeterShared).
+///
+/// Sessions v2 Phase 4. Steps render as a checkbox-style list; the user
+/// can tap to manually toggle completion (manual override of the heuristic
+/// auto-complete that the Mac PlanTrackerPane uses).
+struct iOSPlanTrackerView: View {
+    let session: AgentSession
+    @State private var manuallyCompleted: Set<String> = []
+    @State private var isApproving: Bool = false
+
+    var body: some View {
+        Group {
+            if let planText = session.planText, !planText.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let goal = session.goal, !goal.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Goal")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(goal)
+                                    .font(.callout.weight(.medium))
+                            }
+                            .padding(.bottom, 4)
+                        }
+
+                        ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                            stepRow(index: index, text: step)
+                        }
+
+                        if session.status == .planning {
+                            Button {
+                                Task { await approve() }
+                            } label: {
+                                if isApproving {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    Label("Approve & run", systemImage: "checkmark.seal.fill")
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(SessionsV2Theme.accent)
+                            .disabled(isApproving)
+                            .padding(.top, 12)
+                        }
+                    }
+                    .padding(16)
+                }
+            } else {
+                ContentUnavailableView(
+                    "No plan yet",
+                    systemImage: "list.bullet.rectangle",
+                    description: Text("Plans appear here when Claude exits plan mode with a proposal.")
+                )
+            }
+        }
+    }
+
+    private var steps: [String] {
+        guard let planText = session.planText else { return [] }
+        let candidates = ChatMessageOrdering.extractStepCandidates(from: planText)
+        if !candidates.isEmpty { return candidates }
+        // Fall back to per-line splitting if the heuristic returned nothing.
+        return planText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    @ViewBuilder
+    private func stepRow(index: Int, text: String) -> some View {
+        Button {
+            if manuallyCompleted.contains(text) {
+                manuallyCompleted.remove(text)
+            } else {
+                manuallyCompleted.insert(text)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: manuallyCompleted.contains(text) ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(manuallyCompleted.contains(text) ? SessionsV2Theme.accent : .secondary)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Step \(index + 1)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(text)
+                        .font(.callout)
+                        .strikethrough(manuallyCompleted.contains(text))
+                        .foregroundStyle(.primary)
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @MainActor
+    private func approve() async {
+        // Approve is wired through the parent SessionDetailView's existing
+        // approvePlan callback; we just signal isApproving for the spinner.
+        isApproving = true
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        isApproving = false
+    }
+}

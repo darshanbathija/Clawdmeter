@@ -117,20 +117,23 @@ struct iOSAnalyticsView: View {
     }
 
     private var notPairedCard: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Image(systemName: "qrcode.viewfinder")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(.secondary)
             Text("Not paired with a Mac")
                 .font(.system(size: 17, weight: .semibold))
-            Text("Open the Sessions tab and scan the QR from Clawdmeter on your Mac (Settings → Sessions). Analytics syncs over Tailscale once paired — no iCloud required.")
+            Text("Open Clawdmeter on your Mac and tap **Sync with iPhone** in the header. Analytics syncs over Tailscale once paired — no iCloud required.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
+            PairingCTAButtons(client: agentClient)
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, 32)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }

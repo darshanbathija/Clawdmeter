@@ -70,7 +70,7 @@ struct ContentView: View {
                     Divider()
                         .padding(.horizontal, 4)
 
-                    CodexSection(snapshot: model.codexSnapshot)
+                    CodexSection(snapshot: model.codexSnapshot, agentClient: agentClient)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -211,6 +211,7 @@ private struct ClaudeSection: View {
 
 private struct CodexSection: View {
     let snapshot: UsageStore.Snapshot?
+    @ObservedObject var agentClient: AgentControlClient
 
     var body: some View {
         VStack(spacing: 14) {
@@ -239,7 +240,7 @@ private struct CodexSection: View {
                 }
                 .padding(.horizontal, 4)
             } else {
-                WaitingForMacCard()
+                WaitingForMacCard(agentClient: agentClient)
             }
         }
     }
@@ -366,14 +367,29 @@ private struct LoadingCard: View {
 }
 
 private struct WaitingForMacCard: View {
+    @ObservedObject var agentClient: AgentControlClient
+
+    /// True when the iPhone already has host + token. In that case the
+    /// problem is just "no rollouts yet", not "not paired" — keep the
+    /// CTA hidden so the message reads honestly.
+    private var isPairedWithMac: Bool {
+        agentClient.host != nil && agentClient.token != nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Waiting for the Mac app")
+        VStack(alignment: .leading, spacing: 12) {
+            Text(isPairedWithMac ? "Waiting for the Mac app" : "Not paired with a Mac")
                 .font(.headline)
-            Text("Codex usage syncs from your paired Mac over Tailscale. Open Clawdmeter on the Mac and make sure ~/.codex/sessions/ has at least one rollout. If you haven't paired yet, scan the QR from Mac Settings → Sessions.")
+            Text(isPairedWithMac
+                ? "Codex usage syncs from your paired Mac over Tailscale. Open Clawdmeter on the Mac and make sure `~/.codex/sessions/` has at least one rollout."
+                : "Codex usage syncs from your paired Mac over Tailscale. Tap **Sync with iPhone** on the Mac, then scan the QR or paste the URL below.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if !isPairedWithMac {
+                PairingCTAButtons(client: agentClient, compact: true)
+                    .padding(.top, 2)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
