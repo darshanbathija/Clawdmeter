@@ -9,6 +9,11 @@ struct iOSSessionsView: View {
     @State private var showingNewSession: Bool = false
     @State private var searchQuery: String = ""
     @State private var showArchived: Bool = false
+    /// Repos the user has manually toggled. Wins over the default
+    /// "expanded if live/active, collapsed otherwise" heuristic — once
+    /// the user makes a choice for a repo, it sticks for the session.
+    @State private var manuallyExpanded: Set<String> = []
+    @State private var manuallyCollapsed: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -97,70 +102,136 @@ struct iOSSessionsView: View {
     private var repoList: some View {
         List {
             ForEach(filteredRepos, id: \.key) { repo in
-                Section {
-                    let sessions = sessionsForRepo(repo)
-                    if sessions.isEmpty && repo.recentSessions.isEmpty {
-                        Text("No sessions yet — tap ＋ to start one")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(sessions) { session in
-                            NavigationLink {
-                                SessionDetailView(session: session, client: client)
-                            } label: {
-                                SessionRow(session: session)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if session.archivedAt == nil {
-                                    Button {
-                                        Task { await client.archiveSession(id: session.id) }
-                                    } label: {
-                                        Label("Archive", systemImage: "archivebox")
-                                    }
-                                    .tint(.orange)
-                                } else {
-                                    Button {
-                                        Task { await client.unarchiveSession(id: session.id) }
-                                    } label: {
-                                        Label("Unarchive", systemImage: "archivebox.fill")
-                                    }
-                                    .tint(.blue)
-                                }
-                                Button(role: .destructive) {
-                                    Task { await client.deleteSession(id: session.id) }
-                                } label: {
-                                    Label("End", systemImage: "stop.circle")
-                                }
-                            }
-                        }
-                        if !repo.recentSessions.isEmpty {
-                            recentSessionsHeader
-                            ForEach(repo.recentSessions) { recent in
-                                NavigationLink {
-                                    OutsideSessionDetailView(
-                                        recent: recent, repo: repo, client: client
-                                    )
-                                } label: {
-                                    RecentSessionRow(recent: recent)
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text(repo.displayName)
-                        Spacer()
-                        if repo.liveSessionCount > 0 {
-                            Circle().fill(.green).frame(width: 6, height: 6)
-                        } else if repo.hasActiveSessions {
-                            Circle().fill(terraCotta).frame(width: 6, height: 6)
-                        }
-                    }
-                }
+                repoSection(for: repo)
             }
         }
         .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic),
                     prompt: "Search sessions")
+    }
+
+    /// One collapsible section per repo. Tapping the header (or its
+    /// chevron) toggles expand/collapse. Default state matches the Mac
+    /// dashboard convention: a repo is expanded when it has a live or
+    /// active session, otherwise collapsed — so the user's hot repos
+    /// stay visible while stale ones don't push everything off-screen.
+    @ViewBuilder
+    private func repoSection(for repo: AgentRepo) -> some View {
+        let isExpanded = Binding<Bool>(
+            get: { isRepoExpanded(repo) },
+            set: { newValue in
+                if newValue {
+                    manuallyExpanded.insert(repo.key)
+                    manuallyCollapsed.remove(repo.key)
+                } else {
+                    manuallyCollapsed.insert(repo.key)
+                    manuallyExpanded.remove(repo.key)
+                }
+            }
+        )
+        Section(isExpanded: isExpanded) {
+            repoSectionRows(for: repo)
+        } header: {
+            repoSectionHeader(for: repo, isExpanded: isExpanded)
+        }
+    }
+
+    @ViewBuilder
+    private func repoSectionRows(for repo: AgentRepo) -> some View {
+        let sessions = sessionsForRepo(repo)
+        if sessions.isEmpty && repo.recentSessions.isEmpty {
+            Text("No sessions yet — tap ＋ to start one")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(sessions) { session in
+                NavigationLink {
+                    SessionDetailView(session: session, client: client)
+                } label: {
+                    SessionRow(session: session)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if session.archivedAt == nil {
+                        Button {
+                            Task { await client.archiveSession(id: session.id) }
+                        } label: {
+                            Label("Archive", systemImage: "archivebox")
+                        }
+                        .tint(.orange)
+                    } else {
+                        Button {
+                            Task { await client.unarchiveSession(id: session.id) }
+                        } label: {
+                            Label("Unarchive", systemImage: "archivebox.fill")
+                        }
+                        .tint(.blue)
+                    }
+                    Button(role: .destructive) {
+                        Task { await client.deleteSession(id: session.id) }
+                    } label: {
+                        Label("End", systemImage: "stop.circle")
+                    }
+                }
+            }
+            if !repo.recentSessions.isEmpty {
+                recentSessionsHeader
+                ForEach(repo.recentSessions) { recent in
+                    NavigationLink {
+                        OutsideSessionDetailView(
+                            recent: recent, repo: repo, client: client
+                        )
+                    } label: {
+                        RecentSessionRow(recent: recent)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whole-row tap target. `Section(isExpanded:)` already animates
+    /// the disclosure on header tap, but adding a `Button` over the
+    /// chevron gives an explicit affordance + a row-count badge.
+    @ViewBuilder
+    private func repoSectionHeader(for repo: AgentRepo, isExpanded: Binding<Bool>) -> some View {
+        let count = sessionsForRepo(repo).count + repo.recentSessions.count
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                Text(repo.displayName)
+                    .textCase(nil)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.18), in: Capsule())
+                }
+                Spacer()
+                if repo.liveSessionCount > 0 {
+                    Circle().fill(.green).frame(width: 6, height: 6)
+                } else if repo.hasActiveSessions {
+                    Circle().fill(terraCotta).frame(width: 6, height: 6)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Default-expanded if the repo has a live session, an active
+    /// Clawdmeter-owned session, OR the user has manually expanded it.
+    /// Manual collapse always wins for the rest of the session.
+    private func isRepoExpanded(_ repo: AgentRepo) -> Bool {
+        if manuallyCollapsed.contains(repo.key) { return false }
+        if manuallyExpanded.contains(repo.key) { return true }
+        return repo.liveSessionCount > 0 || repo.hasActiveSessions
     }
 
     private var recentSessionsHeader: some View {

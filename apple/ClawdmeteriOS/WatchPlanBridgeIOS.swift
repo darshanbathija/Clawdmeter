@@ -38,16 +38,41 @@ public final class WatchPlanBridgeIOS: NSObject, WCSessionDelegate {
     }
 
     /// Push the latest pending-plan count + previewing fields to the Watch.
+    ///
+    /// `@MainActor` because the new Sessions-v2 sessions-summary payload
+    /// reads `client.sessions` from a main-actor-isolated method; without
+    /// this annotation Swift 6 concurrency rejects the call.
+    @MainActor
     public func updateContext(count: Int, latestGoal: String?, latestPlanSummary: String?, latestSessionId: UUID?) {
         var context: [String: Any] = ["planWaitingCount": count]
         if let latestGoal { context["latestGoal"] = latestGoal }
         if let latestPlanSummary { context["latestPlanSummary"] = latestPlanSummary }
         if let id = latestSessionId { context["latestSessionId"] = id.uuidString }
+        // Sessions v2 Phase 6: include the session list snapshot in the
+        // same applicationContext push so the watch's list view stays fresh.
+        if let json = encodedSessionsSummary() {
+            context["sessionsSummaryJSON"] = json
+        }
         do {
             try WCSession.default.updateApplicationContext(context)
         } catch {
             bridgeLogger.debug("updateApplicationContext failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Sessions v2 Phase 6: build a compact `[WatchSessionSummary]` from
+    /// the current client.sessions and encode as JSON for transport.
+    @MainActor
+    private func encodedSessionsSummary() -> String? {
+        let summaries = client.sessions
+            .filter { $0.archivedAt == nil }
+            .prefix(20) // keep payload small for WCSession's 64KB cap
+            .map { WatchSessionSummary.from(session: $0, modelCatalog: client.modelCatalog) }
+        guard !summaries.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(Array(summaries)) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     // MARK: - WCSessionDelegate
@@ -83,6 +108,19 @@ public final class WatchPlanBridgeIOS: NSObject, WCSessionDelegate {
             if let raw = message["sessionId"] as? String, let id = UUID(uuidString: raw) {
                 await client.approvePlan(sessionId: id)
                 bridgeLogger.info("Approved plan from Watch for session \(id.uuidString, privacy: .public)")
+            }
+        case "interrupt":
+            // Sessions v2 Phase 6: ESC into the agent pane.
+            if let raw = message["sessionId"] as? String, let id = UUID(uuidString: raw) {
+                await client.interruptSession(sessionId: id)
+                bridgeLogger.info("Interrupted session from Watch: \(id.uuidString, privacy: .public)")
+            }
+        case "requestVoiceReply":
+            // Sessions v2 Phase 6: stub — iPhone-side voice-reply UX lands
+            // in a later Phase. For now, log + forward to a notification
+            // so the user knows the Watch asked for it.
+            if let raw = message["sessionId"] as? String, let id = UUID(uuidString: raw) {
+                bridgeLogger.info("Voice-reply request from Watch for session \(id.uuidString, privacy: .public)")
             }
         default:
             bridgeLogger.debug("Unknown WCSession op: \(op, privacy: .public)")
