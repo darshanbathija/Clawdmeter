@@ -71,6 +71,7 @@
 		7886C417E861C566EE86D686 /* PopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1362703230C869345B8AF6F7 /* PopoverView.swift */; };
 		790A44E079CA0DB17DD6DE66 /* PRMirror.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12661A9455392080A33FC23C /* PRMirror.swift */; };
 		7BCB0D471FC2F297B29ED5CC /* PairingQRPopoverContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A23F364449BE819FB2D8BA0 /* PairingQRPopoverContent.swift */; };
+		7D2F6EEE01C6FF39C4374D33 /* DiagnosticsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 104A8D8EF2D307E5484E7AAA /* DiagnosticsSettingsView.swift */; };
 		7F718BA6D2CE6F6DA93A2683 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = B81715D10D4B9BC96A61072C /* SwiftTerm */; };
 		81D97B8F91A09D98BDB6CB10 /* GitDiffPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = B53A23CB4E962050EF7971CB /* GitDiffPane.swift */; };
 		81F407333048D725DF4BB5EB /* AuditLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB8D04D48E1D2426976FC898 /* AuditLog.swift */; };
@@ -189,6 +190,7 @@
 		0BE652466D437D2E8099589C /* iOSChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSChatStore.swift; sourceTree = "<group>"; };
 		0DC8BB0C1C1A62C078E0C226 /* iOSNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSNotificationManager.swift; sourceTree = "<group>"; };
 		0DFF52BE1A5139A35BB3299F /* PlanWaitingComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanWaitingComplication.swift; sourceTree = "<group>"; };
+		104A8D8EF2D307E5484E7AAA /* DiagnosticsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsSettingsView.swift; sourceTree = "<group>"; };
 		112147989D4BC1A47AD29F81 /* TranscriptLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptLoader.swift; sourceTree = "<group>"; };
 		12661A9455392080A33FC23C /* PRMirror.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PRMirror.swift; sourceTree = "<group>"; };
 		131AD66B762768C8E5DD2D57 /* TerminalWebSocketChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWebSocketChannel.swift; sourceTree = "<group>"; };
@@ -427,6 +429,7 @@
 				052C6AEF07A486E8A35669C5 /* Assets.xcassets */,
 				44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */,
 				0273529FD22962799981CE40 /* DashboardView.swift */,
+				104A8D8EF2D307E5484E7AAA /* DiagnosticsSettingsView.swift */,
 				FEA1C225091C6434AB97D2E8 /* MenuBarGaugeView.swift */,
 				5A23F364449BE819FB2D8BA0 /* PairingQRPopoverContent.swift */,
 				F4AB727DC3A2913C9B91A989 /* PairingSettingsView.swift */,
@@ -825,6 +828,7 @@
 				8ABD7420F16C440E13AA36DF /* ControlModeFrame.swift in Sources */,
 				CD8144413F727D9F57E7BC66 /* ControlModeParser.swift in Sources */,
 				1CF7ABBB2B878047BE44F411 /* DashboardView.swift in Sources */,
+				7D2F6EEE01C6FF39C4374D33 /* DiagnosticsSettingsView.swift in Sources */,
 				CDE7A1BA0C782C1DC9C5CCAD /* DoneDetector.swift in Sources */,
 				2E603388D7C39029FA0C4B45 /* EffortDial.swift in Sources */,
 				81D97B8F91A09D98BDB6CB10 /* GitDiffPane.swift in Sources */,
@@ -994,7 +998,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1229,7 +1233,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 13;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
