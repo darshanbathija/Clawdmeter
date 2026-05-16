@@ -6,6 +6,14 @@ import ClawdmeterShared
 /// countdowns tick live on the wrist.
 struct ContentView: View {
     @ObservedObject var model: WatchUsageModel
+    /// Sessions v2 Phase 6: optional plan bridge so the main view can show
+    /// a "Sessions" entry-point button when iPhone has pushed session data.
+    var planBridge: WatchPlanBridge?
+
+    init(model: WatchUsageModel, planBridge: WatchPlanBridge? = nil) {
+        self.model = model
+        self.planBridge = planBridge
+    }
 
     var body: some View {
         ScrollView {
@@ -24,6 +32,26 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Sessions v2 Phase 6: sessions list entry point.
+                if let bridge = planBridge, !bridge.sessionsSummary.isEmpty {
+                    NavigationLink {
+                        SessionsListView(bridge: bridge)
+                    } label: {
+                        HStack {
+                            Image(systemName: "list.bullet.rectangle")
+                            Text("\(bridge.sessionsSummary.count) sessions")
+                                .font(.caption.weight(.medium))
+                            if bridge.sessionsSummary.contains(where: { $0.needsAttention }) {
+                                Spacer()
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .foregroundStyle(SessionsV2Theme.accent)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 8)
