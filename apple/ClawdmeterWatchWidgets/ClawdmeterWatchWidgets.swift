@@ -12,6 +12,7 @@ import ClawdmeterShared
 struct ClawdmeterWatchWidgetsBundle: WidgetBundle {
     var body: some Widget {
         ClaudeComplication()
+        PlanWaitingComplication()
     }
 }
 

@@ -4,32 +4,59 @@ import OSLog
 
 /// ChatGPT/Codex usage source.
 ///
-/// Codex CLI writes its `rate_limits` server response into every session's
-/// JSONL rollout file (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) inside
-/// `token_count` `event_msg` payloads. The newest entry across all sessions
-/// is the authoritative current state — it carries:
+/// Codex's per-account rate-limit state is reported in TWO places:
+///
+/// 1. **Local JSONL rollouts** (`~/.codex/sessions/.../rollout-*.jsonl`) carry
+///    a `rate_limits` payload inside each `event_msg.token_count` event.
+///    These reflect the **per-CLI-bucket** quota (`limit_id: "codex"`) and
+///    are written every time Codex CLI hits the model API.
+///
+/// 2. **Live HTTP endpoint** `chatgpt.com/backend-api/wham/usage` returns
+///    the **account-wide multi-bucket** view. This is what Codex Desktop's
+///    "Usage remaining" menu shows. The bucket counts can diverge sharply
+///    from the JSONL one: the CLI bucket might read 19% while the account
+///    bucket reads 78% because ChatGPT chat usage counts against the
+///    account-wide window but not the CLI-specific one.
+///
+/// We try the live endpoint first because that matches what Codex Desktop
+/// shows, and fall back to JSONL parsing when the network call fails
+/// (offline, expired token, endpoint change, etc.) — JSONL is local and
+/// always works, just less complete.
+///
+/// Per-bucket fields:
 ///   - `primary`   = 5-hour rolling session window (used_percent, resets_at)
 ///   - `secondary` = 7-day weekly window (used_percent, resets_at)
 ///   - `rate_limit_reached_type` = nil when allowed, string when limited
 ///   - `plan_type` (e.g. "prolite", "plus") — informational
-///
-/// This avoids the network entirely: Codex CLI's auth is a ChatGPT JWT that
-/// works against `chatgpt.com/backend-api/*` but not `api.openai.com`, and the
-/// rate-limit endpoint isn't part of any public contract. The CLI's local
-/// rollout files are the canonical source of truth on this machine.
 public final class CodexSource: AISource {
 
     public let providerID = "codex"
     public let displayName = "Codex"
 
     private let tokenProvider: TokenProvider
+    private let urlSession: URLSession
     private let logger = Logger(subsystem: "com.clawdmeter.shared", category: "CodexSource")
+
+    /// Candidate live-usage endpoints, tried in order. Codex's binary
+    /// references both `/wham/usage` and `/api/codex/usage`; we try the
+    /// newer one first and fall back if it 404s. The fallback chain is
+    /// also our defense if OpenAI renames the path.
+    private static let liveUsageEndpoints: [String] = [
+        "https://chatgpt.com/backend-api/wham/usage",
+        "https://chatgpt.com/backend-api/api/codex/usage",
+    ]
 
     public init(tokenProvider: TokenProvider, urlSession: URLSession? = nil) {
         self.tokenProvider = tokenProvider
-        // urlSession ignored — we read local files only. Keeping the parameter
-        // preserves the AISource initializer shape used by AppRuntime / tests.
-        _ = urlSession
+        if let urlSession {
+            self.urlSession = urlSession
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 8     // bounded — falls back fast
+            config.timeoutIntervalForResource = 12
+            config.waitsForConnectivity = false      // don't queue while offline
+            self.urlSession = URLSession(configuration: config)
+        }
     }
 
     public var isAuthenticated: Bool { tokenProvider.hasToken }
@@ -41,11 +68,22 @@ public final class CodexSource: AISource {
 
     public func poll() async throws -> UsageData {
         // Presence-check the CLI auth as a proxy for "Codex is configured".
-        // We don't actually hit the network; this just gates the gauge.
         guard tokenProvider.hasToken else {
             throw AISourceError.unauthenticated
         }
 
+        // Path 1 — try the live HTTP endpoint that Codex Desktop uses.
+        // This is the only way to get the account-wide bucket (which can
+        // be substantially higher than the CLI-only bucket exposed in
+        // the JSONLs). Any failure path falls through to the local JSONL.
+        if let live = await fetchLiveUsage() {
+            logger.info("Codex live usage: session=\(live.sessionPct)% (resets \(live.sessionEpoch)) weekly=\(live.weeklyPct)% source=wham")
+            return live
+        }
+
+        // Path 2 — fall back to the local JSONL rate_limits payload. This
+        // is the CLI-specific bucket — accurate but potentially lower
+        // than what the user sees in Codex Desktop.
         guard let url = mostRecentSessionFile() else {
             logger.warning("No Codex session JSONL found under ~/.codex/sessions")
             throw AISourceError.dataSourceContractViolation(
@@ -55,13 +93,181 @@ public final class CodexSource: AISource {
 
         do {
             let usage = try parseLatestUsage(from: url)
-            logger.info("Codex usage: session=\(usage.sessionPct)% (resets \(usage.sessionEpoch)) weekly=\(usage.weeklyPct)% (resets \(usage.weeklyEpoch))")
+            logger.info("Codex usage (JSONL fallback): session=\(usage.sessionPct)% (resets \(usage.sessionEpoch)) weekly=\(usage.weeklyPct)% source=jsonl")
             return usage
         } catch let err as AISourceError {
             throw err
         } catch {
             logger.error("Codex JSONL parse failed: \(String(describing: error))")
             throw AISourceError.malformedResponse(detail: "Codex JSONL parse: \(error)")
+        }
+    }
+
+    // MARK: - Live HTTP usage poll
+
+    /// Hit Codex's account-wide usage endpoint and return the parsed
+    /// snapshot. Returns nil for any failure path (no token, no account
+    /// id, network error, non-2xx response, decode failure) — the caller
+    /// then falls back to JSONL.
+    ///
+    /// We try each candidate endpoint in order so we survive OpenAI
+    /// renaming the path (the `/wham/usage` → `/api/codex/usage` switch
+    /// happened mid-2026 in some clients).
+    private func fetchLiveUsage() async -> UsageData? {
+        guard let accessToken = tokenProvider.currentAccessToken else {
+            return nil
+        }
+        let accountId = (tokenProvider as? CodexTokenProvider)?.currentAccountId
+
+        for endpoint in Self.liveUsageEndpoints {
+            guard let url = URL(string: endpoint) else { continue }
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            if let accountId {
+                req.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-ID")
+            }
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            // Codex CLI's user agent — some endpoints require a client
+            // identifier or they 403. Mirror what the CLI sends.
+            req.setValue("Clawdmeter/1.0 (+Codex-compat)", forHTTPHeaderField: "User-Agent")
+
+            do {
+                let (data, response) = try await urlSession.data(for: req)
+                guard let http = response as? HTTPURLResponse else { continue }
+                guard (200..<300).contains(http.statusCode) else {
+                    if http.statusCode == 401 || http.statusCode == 403 {
+                        // Token rejected — no point trying the next endpoint
+                        // with the same credentials. Surface as auth error
+                        // so the caller can prompt for re-login if needed,
+                        // but for the live-path we silently fall through to
+                        // the JSONL parser.
+                        logger.warning("Codex \(endpoint, privacy: .public) returned \(http.statusCode) — falling back to JSONL")
+                        return nil
+                    }
+                    logger.info("Codex \(endpoint, privacy: .public) returned \(http.statusCode) — trying next")
+                    continue
+                }
+                if let parsed = parseLiveUsagePayload(data) {
+                    return parsed
+                }
+                // Non-fatal decode failure; try the next endpoint.
+                logger.info("Codex \(endpoint, privacy: .public) decoded to no usable buckets — trying next")
+            } catch {
+                logger.info("Codex \(endpoint, privacy: .public) network error: \(String(describing: error)) — trying next")
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// Parse the live `/wham/usage` payload into UsageData. The endpoint
+    /// returns BOTH a legacy single-bucket `rate_limits` AND a richer
+    /// `rate_limits_by_limit_id` map (per the Codex CLI's binary type
+    /// `GetAccountRateLimitsResponse`). We prefer the multi-bucket map
+    /// and pick the WORST (highest used_percent) primary bucket — that's
+    /// what Codex Desktop displays.
+    private func parseLiveUsagePayload(_ data: Data) -> UsageData? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        // Collect candidate bucket payloads. Some responses nest under
+        // top-level `rateLimitsByLimitId` (camelCase per ts), others
+        // under `rate_limits_by_limit_id` (snake_case per rust).
+        var buckets: [[String: Any]] = []
+        for key in ["rateLimitsByLimitId", "rate_limits_by_limit_id"] {
+            if let map = root[key] as? [String: [String: Any]] {
+                buckets.append(contentsOf: map.values)
+            } else if let map = root[key] as? [String: Any] {
+                // Some servers return it as [String: Any] when only one bucket
+                // is present.
+                for (_, v) in map { if let v = v as? [String: Any] { buckets.append(v) } }
+            }
+        }
+        // Single-bucket legacy field.
+        for key in ["rateLimits", "rate_limits"] {
+            if let single = root[key] as? [String: Any] {
+                buckets.append(single)
+            }
+        }
+
+        // Pick the bucket with the highest primary.used_percent — that's
+        // the user's most-constrained limit and matches Codex Desktop's
+        // "show me the worst one" behavior.
+        var best: (primary: BucketView, secondary: BucketView?, reached: String?)? = nil
+        for raw in buckets {
+            guard let primary = BucketView(rawBucket: raw["primary"]) else { continue }
+            let secondary = BucketView(rawBucket: raw["secondary"])
+            let reached = raw["rate_limit_reached_type"] as? String
+            if let current = best {
+                if primary.usedPercent > current.primary.usedPercent {
+                    best = (primary, secondary, reached)
+                }
+            } else {
+                best = (primary, secondary, reached)
+            }
+        }
+        guard let pick = best else { return nil }
+
+        let now = Date()
+        let nowEpoch = Int(now.timeIntervalSince1970)
+        let sessionMins = max(0, (pick.primary.resetsAt - nowEpoch + 59) / 60)
+
+        let weeklyPct: Int
+        let weeklyEpoch: Int
+        let weeklyMins: Int
+        if let sec = pick.secondary {
+            weeklyPct = Int(sec.usedPercent.rounded())
+            weeklyEpoch = sec.resetsAt
+            weeklyMins = max(0, (sec.resetsAt - nowEpoch + 59) / 60)
+        } else {
+            weeklyPct = 0
+            weeklyEpoch = nowEpoch + 7 * 24 * 3600
+            weeklyMins = 7 * 24 * 60
+        }
+
+        let resetIsPast = pick.primary.resetsAt <= nowEpoch
+        let status: UsageData.Status
+        if pick.reached != nil {
+            status = .limited
+        } else if resetIsPast {
+            status = .notStarted
+        } else {
+            status = .allowed
+        }
+
+        return UsageData(
+            sessionPct: Int(pick.primary.usedPercent.rounded()),
+            sessionResetMins: sessionMins,
+            sessionEpoch: pick.primary.resetsAt,
+            weeklyPct: weeklyPct,
+            weeklyResetMins: weeklyMins,
+            weeklyEpoch: weeklyEpoch,
+            status: status,
+            representativeClaim: .fiveHour,
+            updatedAt: now
+        )
+    }
+
+    /// Tolerant decoder for a `{used_percent, window_minutes?, resets_at}`
+    /// bucket — handles both camelCase (`usedPercent`/`resetsAt`) and
+    /// snake_case (`used_percent`/`resets_at`) keys.
+    private struct BucketView {
+        let usedPercent: Double
+        let resetsAt: Int
+
+        init?(rawBucket: Any?) {
+            guard let dict = rawBucket as? [String: Any] else { return nil }
+            let pct = (dict["used_percent"] as? Double)
+                ?? (dict["usedPercent"] as? Double)
+                ?? Double(dict["used_percent"] as? Int ?? 0)
+            let resets = (dict["resets_at"] as? Int)
+                ?? (dict["resetsAt"] as? Int)
+                ?? Int(dict["resets_at"] as? Double ?? 0)
+            guard resets > 0 else { return nil }
+            self.usedPercent = pct
+            self.resetsAt = resets
         }
     }
 

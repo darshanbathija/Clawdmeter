@@ -1,0 +1,102 @@
+import SwiftUI
+import AVFoundation
+import ClawdmeterShared
+
+/// Full-screen QR scanner. Decodes a `clawdmeter://host:httpPort?token=...&ws=wsPort`
+/// payload and hands the fields to the AgentControlClient.
+struct PairingScannerView: UIViewControllerRepresentable {
+
+    let onScanned: (PairingChallenge) -> Void
+
+    func makeUIViewController(context: Context) -> ScannerController {
+        let vc = ScannerController()
+        vc.onScanned = onScanned
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: ScannerController, context: Context) {}
+
+    final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+        var onScanned: ((PairingChallenge) -> Void)?
+        private let session = AVCaptureSession()
+        private var previewLayer: AVCaptureVideoPreviewLayer?
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.backgroundColor = .black
+            setupSession()
+        }
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            if !session.isRunning {
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    self?.session.startRunning()
+                }
+            }
+        }
+
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if session.isRunning { session.stopRunning() }
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            previewLayer?.frame = view.bounds
+        }
+
+        private func setupSession() {
+            guard let device = AVCaptureDevice.default(for: .video) else { return }
+            guard let input = try? AVCaptureDeviceInput(device: device) else { return }
+            if session.canAddInput(input) { session.addInput(input) }
+
+            let output = AVCaptureMetadataOutput()
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+                output.setMetadataObjectsDelegate(self, queue: .main)
+                if output.availableMetadataObjectTypes.contains(.qr) {
+                    output.metadataObjectTypes = [.qr]
+                }
+            }
+
+            let layer = AVCaptureVideoPreviewLayer(session: session)
+            layer.videoGravity = .resizeAspectFill
+            view.layer.addSublayer(layer)
+            previewLayer = layer
+        }
+
+        func metadataOutput(
+            _ output: AVCaptureMetadataOutput,
+            didOutput metadataObjects: [AVMetadataObject],
+            from connection: AVCaptureConnection
+        ) {
+            guard let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+                  obj.type == .qr, let value = obj.stringValue else { return }
+            guard let challenge = PairingScannerView.parse(urlString: value) else { return }
+            session.stopRunning()
+            onScanned?(challenge)
+        }
+    }
+
+    /// Parse `clawdmeter://host:httpPort?token=<base64url>&ws=<wsPort>` into
+    /// a `PairingChallenge`. Returns nil for unrecognized URLs.
+    static func parse(urlString: String) -> PairingChallenge? {
+        guard let url = URL(string: urlString),
+              url.scheme == "clawdmeter",
+              let host = url.host,
+              let httpPort = url.port
+        else { return nil }
+        var token: String?
+        var wsPort: Int?
+        if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let items = comps.queryItems {
+            for item in items {
+                if item.name == "token" { token = item.value }
+                if item.name == "ws", let v = item.value, let n = Int(v) { wsPort = n }
+            }
+        }
+        guard let token, let wsPort else { return nil }
+        return PairingChallenge(host: host, port: httpPort, wsPort: wsPort, token: token)
+    }
+}

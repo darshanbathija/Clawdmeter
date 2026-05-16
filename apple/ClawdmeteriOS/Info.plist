@@ -22,9 +22,24 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- Allow plaintext HTTP/WS to the Mac daemon on the Tailscale
+		     interface. The daemon binds to a Tailscale CGNAT IP (filtered
+		     on accept) and the tunnel itself is WireGuard-encrypted —
+		     adding TLS on top would add cert management with no security
+		     gain for the personal-use scope. -->
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan the pairing QR shown on your Mac in Clawdmeter → Settings → Sessions.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.clawdmeter.ios.refresh</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

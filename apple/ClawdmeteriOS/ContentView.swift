@@ -6,7 +6,16 @@ import ClawdmeterShared
 /// Each section mirrors the macOS dashboard's `ProviderColumn` shape.
 struct ContentView: View {
     @ObservedObject var model: UsageModel
+    @StateObject private var agentClient = AgentControlClient()
+    @StateObject private var notifManager: iOSNotificationManager
     @State private var showingSettings: Bool = false
+
+    init(model: UsageModel) {
+        self.model = model
+        let client = AgentControlClient()
+        _agentClient = StateObject(wrappedValue: client)
+        _notifManager = StateObject(wrappedValue: iOSNotificationManager(client: client))
+    }
 
     var body: some View {
         TabView {
@@ -19,9 +28,18 @@ struct ContentView: View {
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")
                 }
+
+            iOSSessionsView(client: agentClient)
+                .tabItem {
+                    Label("Sessions", systemImage: "rectangle.connected.to.line.below")
+                }
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(model: model)
+        }
+        .task {
+            await notifManager.requestAuthorizationIfNeeded()
+            notifManager.scheduleBackgroundRefresh()
         }
     }
 

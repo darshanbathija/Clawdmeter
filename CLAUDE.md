@@ -173,6 +173,146 @@ Source PNG: `~/Downloads/Clawd Logo.png` (user's design). Crop pipeline in
 No flood-fill, no rim sweep, no pixel manipulation — the HSV crop alone
 removes the source's white outer area cleanly.
 
+## Sessions feature (added 2026-05-16, extended through Phase G3)
+
+Read-write control plane for Claude Code + Codex CLI agent sessions, on top
+of the existing read-only analytics. Mac runs a SwiftNIO-free
+Network.framework HTTP+WS daemon (port 21731 / 21732) inside `ClawdmeterMac`;
+iPhone + Watch consume it over Tailscale. tmux `-CC` is the PTY layer.
+
+### Daemon + data layer — `apple/ClawdmeterMac/AgentControl/`
+- `TmuxControlClient` (actor) + `ControlModeParser` + `PseudoTerminal` —
+  the parser was Phase 0-validated against tmux 3.6a; see
+  `tools/tmux-cc-probe/` for the unit + integration tests. Owns
+  `splitWindow` (G12 multi-terminal) and `killPane`.
+- `AgentControlServer` + `WSChannel` protocol + `TerminalWebSocketChannel`
+  + `AgentEventStream` — dual-port listener (HTTP + WS) with
+  accept-handler peer filter to `127/8`, `::1`, `100.64/10` CGNAT, and
+  `fd7a:115c:a1e0::/48` Tailscale IPv6. Every endpoint requires
+  `Authorization: Bearer <token>` from `PairingTokenStore`. Non-loopback
+  additionally verified via `TailscaleWhois` (60s cache, fail-closed-on-error).
+  WS subscription envelope can target a specific `paneId` (G12 multi-
+  terminal); falls back to the session's primary pane when absent.
+- `AgentSessionRegistry` (@MainActor ObservableObject) — atomic
+  `sessions.json` schema v2 + per-session monotonic `eventSeq` (E8 cursor
+  contract). Schema v2 added `mode`, `archivedAt`, `terminalPanes`,
+  `scheduledFollowUps`, and `parentSessionId`; v1 files decode cleanly
+  because the new keys default to empty in `AgentSession.init(from:)`.
+- `RepoIndex` (actor) — background refresh from `~/.claude/projects/`,
+  `~/.codex/sessions/`, and user-configured scan roots (default empty;
+  bounded 4-level depth on git discovery). Two activity windows:
+  `liveNowWindow` (5 min, drives the green dot) and `recentActivityWindow`
+  (30 days, drives the per-JSONL "Recent" rows in the sidebar).
+- `JSONLTail` + `DoneDetector` + `PlanModeWatcher` + `SessionEventWiring`
+  — per-session JSONL watch fires plan-ready / done-detected events into
+  the registry, which the AgentEventStream fans out to subscribed clients.
+- `TmuxSupervisor` — auto-restart on `%exit` with exponential backoff;
+  marks sessions degraded; banner in Mac Settings → Sessions tab.
+- `ShellRunner` — argv-only subprocess wrapper. NEVER concat into shell
+  strings (the repo path has a space; concat breaks).
+- `SessionScheduler` (G15) — single re-armable `DispatchSourceTimer`
+  observing `registry.$sessions`; fires scheduled follow-ups by pasting
+  the prompt into the session's tmux pane via `paste-buffer`.
+- `PRMirror` (G16) — auto-detects a GitHub PR URL in chat (regex over
+  assistant text + tool_result bodies), polls `gh pr view --json` every
+  30s, exposes title / state / additions / deletions / review state +
+  an Approve action that shells out to `gh pr review --approve`.
+- `PluginRegistry` (G18) — read-only inventory of MCP servers + plugins
+  from `~/.codex/config.toml` and `~/.claude/settings.json`. Surfaced in
+  the Pairing Settings pane.
+- `SpeechDictation` (G11) — `SFSpeechRecognizer` + `AVAudioEngine`
+  wrapper. Ctrl+M toggles dictation in the composer; partial transcripts
+  append live via `.onReceive(dictation.$partialTranscript)`.
+
+### Mac UI — `apple/ClawdmeterMac/Workspace/`
+Three-pane workspace replaces the prior 2-pane push/pop (which had a
+back-button bug on macOS NavSplitView). `HSplitView` with sidebar | thread
+| review. Width-responsive via a `WorkspaceWidthKey` PreferenceKey:
+- ≥ 1100pt → all three panes; review pane respects the user's Cmd+W toggle.
+- < 1100pt → review pane drops out so Sessions sidebar + chat stay
+  first-class. Toolbar Cmd+W button disables itself with a "widen the
+  window" tooltip.
+- `SessionWorkspaceView.swift` — the container.
+- `ModePicker.swift` — chip-style segmented control above the composer
+  (Local | Worktree | Cloud-disabled). Switching mode mid-session
+  re-spawns the agent in the new cwd via the D13 overlay flow.
+- `GitDiffPane.swift` — live `git diff HEAD` with per-hunk Stage/Revert,
+  Commit sheet, vnode watch on `.git/index` for auto-refresh.
+- `PlanTrackerPane.swift` — vertical step timeline derived from
+  `planText` + numbered/Step lines in assistant turns; heuristic
+  auto-complete + manual tap-toggle; Approve & run button.
+- `SourcesPane.swift` — file + URL citations from Read/Grep/Glob/
+  WebFetch tool_use blocks (G9).
+- `ArtifactsPane.swift` — thumbnail grid + `QLPreviewView` overlay for
+  PDF/image/doc artifacts the agent wrote (G10).
+- `InAppBrowser.swift` — `WKWebView` + nav chrome + Cmd-click element
+  comment overlay that injects `[BROWSER COMMENT @ <selector>] <text>`
+  into the agent's tmux pane (G13).
+- `PRReviewPane.swift` — G16 PR card with state badge + body + Approve.
+- `MarkdownRenderer.swift` (under `AgentControl/`) — native
+  `AttributedString(markdown:)` for assistant bubbles + fenced code
+  blocks with monospaced rendering (G4).
+- `ChatThreadScroll` (inside `SessionWorkspaceView.swift`) — groups
+  consecutive tool_use + tool_result messages into a single "Ran N
+  commands" `DisclosureGroup`; each tool inside is itself expandable.
+  Smart auto-scroll: only follows new messages when the bottom anchor
+  is visible (otherwise the user is reading history and we don't yank
+  them). "Jump to latest" overlay button appears when scrolled away.
+- `PoppedOutSessionView` (in `ClawdmeterMacApp.swift`) — G14 detachable
+  session window scene `session-detail` opened via `openWindow(value:)`;
+  pin button toggles `NSWindow.level = .floating` for stay-on-top.
+
+### Keyboard
+- `Cmd+N` — new session sheet.
+- `Cmd+W` — toggle review pane (greyed out at narrow widths).
+- `Cmd+Shift+F` — focus sidebar search.
+- `Cmd+1..9` — jump to Nth visible session.
+- `Cmd+;` — branch a sub-chat off the open session (G17, nested under
+  parent in the sidebar via `parentSessionId`).
+- `Cmd+⌥+N` — pop out the open session into a detached window.
+- `Cmd+↩` — send composer input.
+- `Ctrl+M` — toggle voice dictation in the composer.
+
+### Sidebar behavior
+- Repos sort by most-recent activity (newest first); alphabetical
+  fallback; "Other" always last.
+- Each repo expands to show Clawdmeter-spawned sessions (registry-
+  owned), sub-chats nested under their parents (G17), then a "Recent
+  (last 30 days)" section listing every JSONL touched in the window —
+  one row per JSONL with relative timestamp and a green dot when still
+  in the live-now window. Clicking a recent row opens that specific
+  JSONL as read-only chat (synthetic AgentSession pinned to the path).
+- Search field + Show-archived toggle. Context-menu on each session
+  row: Archive / Unarchive, New sub-chat, End session.
+
+### iOS / Watch
+- iOS surface: `apple/ClawdmeteriOS/iOSSessionsView.swift` (third
+  TabView tab) + `AgentControlClient` + `PairingScannerView` (AVCapture
+  QR scanner) + `iOSTerminalView` (SwiftTerm + 7-button keyboard accessory)
+  + `iOSNotificationManager` (BGAppRefreshTask + UNUserNotificationCenter,
+  D15 path — no APNS). G2/G3 surfaces (multi-terminal tab strip, in-app
+  browser, PR review, sub-chats, scheduler) are Mac-only in v1.
+- Watch surface: `PlanWaitingComplication` (`.accessoryCircular` only
+  per D10) + `PlanApprovalView` + `WatchPlanBridge` (WCSession from iPhone).
+
+### State + tests
+Build matrix: Mac, iOS, and Watch all build clean. Tests: 79/79 in
+ClawdmeterShared (Protocol round-trip + back-compat for SessionMode,
+G2 schema fields, RecentSession), 19/19 in tools/tmux-cc-probe.
+Implementation status doc at `docs/designs/sessions-IMPLEMENTATION-STATUS.md`;
+full CEO plan at `docs/designs/sessions-control-plane.md`.
+
+Feature flag: `UserDefaults clawdmeter.sessions.enabled` (default true).
+When false, daemon doesn't start and Sessions tab is hidden.
+
+### SessionChatStore JSONL resolution
+
+`SessionChatStore.resolveSessionFileURL(repoCwd:)` applies Claude's full
+project-dir encoding (`/`, `_`, ` ` → `-`) and walks up parent
+directories: when Claude was launched from a parent of the git repo
+(e.g. `CC Watch/` wrapping `Clawdmeter/`), the JSONLs are filed under
+the parent's encoded name. A naive `/`→`-` encoder misses both cases.
+
 ## Style + voice
 
 - Code comments lead with **what + why**, not implementation play-by-play.
