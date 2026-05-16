@@ -73,6 +73,23 @@ public final class CodexTokenProvider: TokenProvider, @unchecked Sendable {
         }
     }
 
+    /// Workspace / ChatGPT account UUID. The Codex backend's usage endpoint
+    /// requires this in the `ChatGPT-Account-ID` header so it can scope the
+    /// rate-limit lookup to the right workspace (users can be members of
+    /// multiple). Returns `nil` when auth is on API-key mode (no account
+    /// concept) or the file hasn't been loaded yet.
+    public var currentAccountId: String? {
+        lock.lock(); defer { lock.unlock() }
+        if let cached, let id = cached.tokens?.accountId { return id }
+        do {
+            let bundle = try loadFromDisk()
+            cached = bundle
+            return bundle.tokens?.accountId
+        } catch {
+            return nil
+        }
+    }
+
     public var hasToken: Bool { currentAccessToken != nil }
 
     /// Re-read the file so we pick up rotations the Codex CLI does on its own.
