@@ -20,13 +20,38 @@ public struct AgentRepo: Codable, Hashable, Sendable {
     public let key: String
     /// Human-friendly display name (last path component, or "Other").
     public let displayName: String
-    /// True when this repo currently has at least one live agent session.
+    /// True when this repo currently has at least one live agent session
+    /// (one Clawdmeter spawned). Distinct from `liveSessionCount`.
     public let hasActiveSessions: Bool
+    /// Count of session JSONLs under this repo with mtime within the last
+    /// 5 minutes — i.e. agents that are actively writing to disk RIGHT NOW,
+    /// regardless of whether Clawdmeter spawned them. Lets the UI surface
+    /// Conductor / Cursor / system-Terminal sessions that the user
+    /// started independently. Optional (default 0) so old wire stays valid.
+    public let liveSessionCount: Int
 
-    public init(key: String, displayName: String, hasActiveSessions: Bool) {
+    public init(
+        key: String,
+        displayName: String,
+        hasActiveSessions: Bool,
+        liveSessionCount: Int = 0
+    ) {
         self.key = key
         self.displayName = displayName
         self.hasActiveSessions = hasActiveSessions
+        self.liveSessionCount = liveSessionCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.key = try c.decode(String.self, forKey: .key)
+        self.displayName = try c.decode(String.self, forKey: .displayName)
+        self.hasActiveSessions = try c.decode(Bool.self, forKey: .hasActiveSessions)
+        self.liveSessionCount = (try? c.decode(Int.self, forKey: .liveSessionCount)) ?? 0
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case key, displayName, hasActiveSessions, liveSessionCount
     }
 }
 

@@ -69,7 +69,7 @@ struct PairingSettingsView: View {
     private var pairingPanel: some View {
         HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Scan this QR with Clawdmeter on your iPhone.")
+                Text("Scan the QR or copy the URL into Clawdmeter on your iPhone.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 if let httpPort = runtime.agentControlServer.boundPort,
@@ -82,6 +82,17 @@ struct PairingSettingsView: View {
                         value: String(tokenForDisplay.prefix(8)) + "…",
                         secondary: true
                     )
+                    HStack(spacing: 8) {
+                        Button("Copy pairing URL") {
+                            copyPairingURL()
+                        }
+                        if didCopy {
+                            Text("Copied ✓")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .padding(.top, 4)
                 } else {
                     Text("Daemon not running")
                         .foregroundStyle(.red)
@@ -99,6 +110,20 @@ struct PairingSettingsView: View {
                     .fill(.secondary.opacity(0.2))
                     .frame(width: 200, height: 200)
             }
+        }
+    }
+
+    @State private var didCopy: Bool = false
+
+    private func copyPairingURL() {
+        guard let httpPort = runtime.agentControlServer.boundPort,
+              let wsPort = runtime.agentControlServer.boundWsPort else { return }
+        let url = "clawdmeter://\(macHost()):\(httpPort)?token=\(tokenForDisplay)&ws=\(wsPort)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        didCopy = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            didCopy = false
         }
     }
 
@@ -185,7 +210,8 @@ struct PairingSettingsView: View {
     }
 
     /// Best-effort: read the Tailscale MagicDNS name from `tailscale status`.
-    /// Falls back to `Host.current().localizedName`.
+    /// Falls back to `127.0.0.1` (works from iOS Simulator on the same Mac;
+    /// real iPhones reach the Mac via the MagicDNS name over Tailscale).
     private func macHost() -> String {
         if let result = try? Process.runAndCapture(
             "/opt/homebrew/bin/tailscale", ["status", "--json"]
@@ -196,7 +222,7 @@ struct PairingSettingsView: View {
            !dnsName.isEmpty {
             return dnsName.trimmingCharacters(in: CharacterSet(charactersIn: "."))
         }
-        return Host.current().localizedName ?? "localhost"
+        return "127.0.0.1"
     }
 
     private func generateQR(from string: String) -> NSImage? {

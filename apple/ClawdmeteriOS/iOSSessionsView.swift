@@ -256,16 +256,36 @@ private struct PairingFlow: View {
     @ObservedObject var client: AgentControlClient
     @Binding var isPresented: Bool
 
+    @State private var mode: PairingMode = .scan
+    @State private var pastedURL: String = ""
+    @State private var pasteError: String?
+
+    enum PairingMode: String, CaseIterable {
+        case scan = "Scan QR"
+        case paste = "Paste URL"
+    }
+
     var body: some View {
         NavigationStack {
-            PairingScannerView { challenge in
-                client.setPairing(
-                    host: challenge.host,
-                    httpPort: challenge.port,
-                    wsPort: challenge.wsPort,
-                    token: challenge.token
-                )
-                isPresented = false
+            VStack(spacing: 0) {
+                Picker("Mode", selection: $mode) {
+                    ForEach(PairingMode.allCases, id: \.self) { m in
+                        Text(m.rawValue).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(16)
+
+                Divider()
+
+                switch mode {
+                case .scan:
+                    PairingScannerView { challenge in
+                        applyChallenge(challenge)
+                    }
+                case .paste:
+                    pasteForm
+                }
             }
             .navigationTitle("Pair to Mac")
             .navigationBarTitleDisplayMode(.inline)
@@ -275,6 +295,50 @@ private struct PairingFlow: View {
                 }
             }
         }
+    }
+
+    private var pasteForm: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Open Clawdmeter on your Mac → Settings → Sessions → Copy pairing URL. Then paste it below.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("clawdmeter://host:21731?token=...&ws=21732", text: $pastedURL, axis: .vertical)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .lineLimit(3...6)
+                .textFieldStyle(.roundedBorder)
+            if let error = pasteError {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+            Button("Pair") {
+                guard let challenge = PairingScannerView.parse(urlString: pastedURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    pasteError = "Not a valid clawdmeter:// URL"
+                    return
+                }
+                applyChallenge(challenge)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0))
+            .disabled(pastedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Spacer()
+        }
+        .padding(20)
+    }
+
+    private func applyChallenge(_ challenge: PairingChallenge) {
+        client.setPairing(
+            host: challenge.host,
+            httpPort: challenge.port,
+            wsPort: challenge.wsPort,
+            token: challenge.token
+        )
+        Task { @MainActor in
+            await client.refreshAll()
+        }
+        isPresented = false
     }
 }
 
