@@ -648,7 +648,7 @@ public final class AgentControlServer {
     // MARK: - Sessions v2 Phase 0 handlers
 
     private func handleChangeModel(sessionId: String, request: HTTPRequest, connection: NWConnection) async {
-        guard let uuid = UUID(uuidString: sessionId), registry.session(id: uuid) != nil else {
+        guard let uuid = UUID(uuidString: sessionId), let session = registry.session(id: uuid) else {
             sendResponse(.notFound, on: connection); return
         }
         guard let req = try? JSONDecoder().decode(ChangeModelRequest.self, from: request.body) else {
@@ -657,18 +657,36 @@ public final class AgentControlServer {
         guard !req.model.isEmpty, ModelCatalog.bundled.entry(forId: req.model) != nil else {
             sendResponse(.badRequest, on: connection); return
         }
+        guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
+            sendResponse(.tooManyRequests, on: connection); return
+        }
+        let oldModel = session.model
         registry.setModel(id: uuid, model: req.model, effort: req.effort)
+        let peer = Self.endpointString(connection.endpoint)
+        await AuditLog.shared.recordSwap(
+            sessionId: uuid, sourcePeer: peer,
+            from: oldModel, to: req.model, effort: req.effort?.rawValue
+        )
         await respondWithSession(uuid: uuid, connection: connection)
     }
 
     private func handleChangeEffort(sessionId: String, request: HTTPRequest, connection: NWConnection) async {
-        guard let uuid = UUID(uuidString: sessionId), registry.session(id: uuid) != nil else {
+        guard let uuid = UUID(uuidString: sessionId), let session = registry.session(id: uuid) else {
             sendResponse(.notFound, on: connection); return
         }
         guard let req = try? JSONDecoder().decode(ChangeEffortRequest.self, from: request.body) else {
             sendResponse(.badRequest, on: connection); return
         }
+        guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
+            sendResponse(.tooManyRequests, on: connection); return
+        }
         registry.setEffort(id: uuid, effort: req.effort)
+        let peer = Self.endpointString(connection.endpoint)
+        await AuditLog.shared.recordSwap(
+            sessionId: uuid, sourcePeer: peer,
+            from: session.model, to: session.model ?? "(default)",
+            effort: req.effort.rawValue
+        )
         await respondWithSession(uuid: uuid, connection: connection)
     }
 
@@ -681,6 +699,9 @@ public final class AgentControlServer {
         }
         if req.mode == .cloud {
             sendResponse(.badRequest, on: connection); return
+        }
+        guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
+            sendResponse(.tooManyRequests, on: connection); return
         }
         registry.updateRuntime(
             id: uuid,
@@ -697,6 +718,12 @@ public final class AgentControlServer {
             // `approve-plan` or via the mode picker.
             registry.setPlanMode(id: uuid, planMode: planMode)
         }
+        let peer = Self.endpointString(connection.endpoint)
+        await AuditLog.shared.recordSwap(
+            sessionId: uuid, sourcePeer: peer,
+            from: session.model, to: session.model ?? "(default)",
+            effort: "(mode=\(req.mode.rawValue))"
+        )
         await respondWithSession(uuid: uuid, connection: connection)
     }
 
@@ -714,6 +741,9 @@ public final class AgentControlServer {
         guard let paneId = session.tmuxPaneId ?? session.tmuxWindowId else {
             sendResponse(.internalError, on: connection); return
         }
+        guard RateLimiter.shared.tryAcquireSend(sessionId: uuid) else {
+            sendResponse(.tooManyRequests, on: connection); return
+        }
         do {
             let data = Data(bytes)
             if req.asFollowUp || bytes.count > 256 || req.text.contains("\n") {
@@ -721,6 +751,8 @@ public final class AgentControlServer {
             } else {
                 try await tmux.sendKeys(paneId: paneId, bytes: data)
             }
+            let peer = Self.endpointString(connection.endpoint)
+            await AuditLog.shared.recordSend(sessionId: uuid, sourcePeer: peer, text: req.text)
             sendJSON(["ok": true], on: connection)
         } catch {
             serverLogger.error("send-prompt failed: \(error.localizedDescription, privacy: .public)")
@@ -742,13 +774,18 @@ public final class AgentControlServer {
     }
 
     private func handleSetAutopilot(sessionId: String, request: HTTPRequest, connection: NWConnection) async {
-        guard let uuid = UUID(uuidString: sessionId), registry.session(id: uuid) != nil else {
+        guard let uuid = UUID(uuidString: sessionId), let session = registry.session(id: uuid) else {
             sendResponse(.notFound, on: connection); return
         }
         guard let req = try? JSONDecoder().decode(AutopilotRequest.self, from: request.body) else {
             sendResponse(.badRequest, on: connection); return
         }
         AutopilotState.shared.setEnabled(req.enabled, sessionId: uuid)
+        let peer = Self.endpointString(connection.endpoint)
+        await AuditLog.shared.recordAutopilotToggle(
+            sessionId: uuid, sourcePeer: peer,
+            enabled: req.enabled, repoKey: session.repoKey
+        )
         await respondWithSession(uuid: uuid, connection: connection)
     }
 
@@ -1476,6 +1513,11 @@ public final class AgentControlServer {
         static let internalError = HTTPResponse(
             status: 500, reason: "Internal Server Error",
             contentType: "text/plain", body: Data("Internal Server Error\n".utf8)
+        )
+        static let tooManyRequests = HTTPResponse(
+            status: 429, reason: "Too Many Requests",
+            contentType: "application/json",
+            body: Data(#"{"error":"rate_limited","retryAfter":"see Retry-After"}"#.utf8)
         )
     }
 
