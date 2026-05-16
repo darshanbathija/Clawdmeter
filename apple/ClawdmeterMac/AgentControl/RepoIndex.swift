@@ -433,81 +433,18 @@ public actor RepoIndex {
             lineStart = (newlineIdx < chunk.endIndex)
                 ? chunk.index(after: newlineIdx)
                 : chunk.endIndex
-            guard !lineBytes.isEmpty,
-                  let json = try? JSONSerialization.jsonObject(with: lineBytes) as? [String: Any]
-            else { continue }
-            guard (json["type"] as? String) == "user" else { continue }
-            guard let message = json["message"] as? [String: Any] else { continue }
-            // content can be a string (prompt) or array of blocks.
-            if let text = message["content"] as? String,
-               let cleaned = cleanPrompt(text) {
-                return cleaned
-            }
-            if let blocks = message["content"] as? [[String: Any]] {
-                for block in blocks {
-                    let blockType = block["type"] as? String
-                    if blockType == "text", let text = block["text"] as? String,
-                       let cleaned = cleanPrompt(text) {
-                        return cleaned
-                    }
-                    // `tool_result` blocks aren't user prompts — skip.
-                }
+            // Delegate to the shared JSONLLineDecoder so the
+            // `<system-reminder>` stripping, `<command-name>` unwrap, and
+            // 80-char truncation live in exactly one place. This used to
+            // be a per-file duplicate `cleanPrompt` here; consolidating
+            // also gets us the XCTest coverage that already exists in
+            // `JSONLLineDecoderTests`.
+            guard let json = JSONLLineDecoder.decodeJSON(line: Data(lineBytes)) else { continue }
+            if let prompt = JSONLLineDecoder.decodeUserPrompt(from: json) {
+                return prompt
             }
         }
         return nil
-    }
-
-    /// Normalize a raw user prompt: strip system reminders, collapse
-    /// whitespace, trim to one line, cap at 80 chars. Returns nil if
-    /// nothing user-visible remains.
-    private static func cleanPrompt(_ raw: String) -> String? {
-        var text = raw
-        // Claude Code wraps system-reminder content in <system-reminder>
-        // tags; strip them so the row doesn't read "<system-reminder>...".
-        while let openRange = text.range(of: "<system-reminder>") {
-            let afterOpen = openRange.upperBound
-            if let closeRange = text.range(of: "</system-reminder>", range: afterOpen..<text.endIndex) {
-                text.removeSubrange(openRange.lowerBound..<closeRange.upperBound)
-            } else {
-                text.removeSubrange(openRange.lowerBound..<text.endIndex)
-            }
-        }
-        // Also strip <command-name> / <command-message> / <command-args>
-        // wrappers Claude Code uses for slash commands. We keep the
-        // command name itself as it's a useful summary.
-        for tag in ["command-name", "command-args", "command-message", "local-command-stdout"] {
-            let open = "<\(tag)>"
-            let close = "</\(tag)>"
-            while let openRange = text.range(of: open) {
-                if let closeRange = text.range(of: close, range: openRange.upperBound..<text.endIndex) {
-                    if tag == "command-name" {
-                        // Keep the inner text as the prompt.
-                        let inner = text[openRange.upperBound..<closeRange.lowerBound]
-                        text = String(inner)
-                        break
-                    } else {
-                        text.removeSubrange(openRange.lowerBound..<closeRange.upperBound)
-                    }
-                } else {
-                    text.removeSubrange(openRange.lowerBound..<text.endIndex)
-                    break
-                }
-            }
-        }
-        let collapsed = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !collapsed.isEmpty else { return nil }
-        if collapsed.count <= 80 { return collapsed }
-        let head = collapsed.prefix(80)
-        // Prefer a word boundary to avoid mid-word truncation.
-        if let lastSpace = head.lastIndex(of: " "), head.distance(from: head.startIndex, to: lastSpace) > 40 {
-            return String(collapsed[..<lastSpace]) + "…"
-        }
-        return String(head) + "…"
     }
 
     /// BFS under `root` for `.git` directories or files (worktree markers).

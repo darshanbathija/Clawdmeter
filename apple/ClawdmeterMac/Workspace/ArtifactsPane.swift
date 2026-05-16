@@ -90,13 +90,9 @@ struct ArtifactsPane: View {
         var filename: String { url.lastPathComponent }
     }
 
-    private static let artifactExtensions: Set<String> = [
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-        "png", "jpg", "jpeg", "gif", "svg", "webp", "tiff",
-        "mp4", "mov", "mp3", "wav",
-        "csv", "tsv",
-        "zip", "tar", "gz",
-    ]
+    // The artifact-extension allowlist used to live here. After T9 the
+    // single source of truth is `StagingParser.artifactExtensions` —
+    // the pane reads pre-filtered entries from `snapshot.artifactEntries`.
 
     /// T9: read precomputed artifact entries from the snapshot, resolve
     /// relative paths against the session cwd, and filter to files that

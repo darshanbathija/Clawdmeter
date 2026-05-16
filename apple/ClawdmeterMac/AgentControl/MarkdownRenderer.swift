@@ -58,6 +58,13 @@ struct MarkdownRenderer: View {
                 cachedChunks = Self.prepare(source: source)
             }
         }
+        // SwiftUI's LazyVStack recycling means a row's @State can outlive
+        // the original `source` (e.g., when the underlying message id
+        // changes via diffing). Re-parse on source change so we don't
+        // render stale markdown chunks for a different message body.
+        .onChange(of: source) { _, newValue in
+            cachedChunks = Self.prepare(source: newValue)
+        }
     }
 
     private static func prepare(source: String) -> [PreparedChunk] {

@@ -104,7 +104,11 @@ final class GitDiffStore: ObservableObject {
                 arguments: ["-C", repoCwd, "diff", "--unified=3", "HEAD"],
                 timeout: 10
             )
-            if result.exitStatus != 0 && !result.stdoutString.isEmpty == false {
+            // Treat as error only when git exited non-zero AND produced
+            // no diff output. `git diff HEAD` returns 0 even with deltas,
+            // so a non-zero exit with no stdout is a real failure (missing
+            // repo, lock contention, etc.).
+            if result.exitStatus != 0 && result.stdoutString.isEmpty {
                 lastError = result.stderrString.trimmingCharacters(in: .whitespacesAndNewlines)
                 files = []
                 return

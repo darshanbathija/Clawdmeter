@@ -19,7 +19,12 @@ struct PlanTrackerPane: View {
     @ObservedObject var chatStore: SessionChatStore
     let onApprove: () -> Void
 
-    @State private var manuallyToggled: Set<String> = []
+    /// Per-step manual override: when the user taps a step, their explicit
+    /// state wins over the heuristic. Storing the override as a `Bool`
+    /// (not a `Set<String>` toggle) avoids a silent flip when the
+    /// heuristic later decides `step.isComplete` changed — the user's
+    /// last intent is preserved regardless of what the heuristic thinks.
+    @State private var manualOverride: [String: Bool] = [:]
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -119,14 +124,12 @@ struct PlanTrackerPane: View {
     }
 
     private func stepRow(_ step: PlanStep) -> some View {
-        let manual = manuallyToggled.contains(step.id)
-        let effectivelyComplete = manual ? !step.isComplete : step.isComplete
+        let effectivelyComplete = manualOverride[step.id] ?? step.isComplete
         return Button(action: {
-            if manuallyToggled.contains(step.id) {
-                manuallyToggled.remove(step.id)
-            } else {
-                manuallyToggled.insert(step.id)
-            }
+            // Tap inverts the CURRENT shown state (not the heuristic
+            // alone), so once the user explicitly sets a step's status
+            // it sticks even if the heuristic later re-evaluates.
+            manualOverride[step.id] = !effectivelyComplete
         }) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: effectivelyComplete ? "checkmark.circle.fill" : "circle")
@@ -165,33 +168,10 @@ struct PlanTrackerPane: View {
         .padding(.vertical, 32)
     }
 
-    // MARK: - Derivations
-    // Step extraction + isComplete now precomputed in StagingParser
-    // (T8). `chatStore.snapshot.planSteps` is the source of truth.
-    // `extractSteps` kept here for backward compatibility with any
-    // existing test fixtures; new code path goes through the actor.
-
-    /// Pull "1.", "Step 1:", or "- " items from a body. Trims numbering.
-    static func extractSteps(from body: String) -> [String] {
-        var out: [String] = []
-        for raw in body.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            // numbered: "1. ..."
-            if let match = line.range(of: #"^\d+\.\s+"#, options: .regularExpression) {
-                let content = String(line[match.upperBound...]).trimmingCharacters(in: .whitespaces)
-                if !content.isEmpty { out.append(content) }
-                continue
-            }
-            // "Step N: ..."
-            if let match = line.range(of: #"^Step\s+\d+:?\s+"#,
-                                     options: [.regularExpression, .caseInsensitive]) {
-                let content = String(line[match.upperBound...]).trimmingCharacters(in: .whitespaces)
-                if !content.isEmpty { out.append(content) }
-                continue
-            }
-        }
-        return out
-    }
+    // Step extraction + isComplete are precomputed by `StagingParser`
+    // (T8) and read from `chatStore.snapshot.planSteps`. The legacy
+    // `extractSteps` helper that lived here was unreferenced after the
+    // T8 migration; deleted in the post-perf cleanup.
 
     private var terraCotta: Color {
         Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0)

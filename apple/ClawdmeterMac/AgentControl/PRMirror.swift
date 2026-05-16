@@ -142,12 +142,19 @@ public final class PRMirror: ObservableObject {
 
     // MARK: - Detection
 
+    /// Compiled once at class load. `findPRURL` was previously recompiling
+    /// this regex per-message inside the reversed-scan loop — for long
+    /// sessions with no PR URL yet, that meant thousands of
+    /// `NSRegularExpression(pattern:)` allocations per snapshot tick.
+    private static let prURLRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+"#
+    )
+
     /// Find a `https://github.com/<owner>/<repo>/pull/<n>` URL anywhere in
     /// the chat (newest assistant turns first).
     public static func findPRURL(in messages: [SessionChatStore.ChatMessage]) -> URL? {
-        let pattern = #"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+"#
+        guard let regex = prURLRegex else { return nil }
         for msg in messages.reversed() {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
             let range = NSRange(msg.body.startIndex..., in: msg.body)
             if let match = regex.firstMatch(in: msg.body, range: range),
                let r = Range(match.range, in: msg.body),

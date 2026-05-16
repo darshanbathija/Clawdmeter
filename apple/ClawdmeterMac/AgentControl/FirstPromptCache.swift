@@ -40,6 +40,14 @@ public final class FirstPromptCache: @unchecked Sendable {
     private var entries: [String: Entry] = [:]
     private let lock = NSLock()
     private let storeURL: URL
+    /// Set when `load()` finds a sidecar with a schemaVersion GREATER
+    /// than `currentSchemaVersion` — protects future-format files from
+    /// being overwritten with our older format on the next save. The
+    /// classic broken case: user installs vNext (writes schema v2),
+    /// downgrades to this binary (expects v1), and the downgrade silently
+    /// wipes their accumulated cache. With this flag, downgrades leave
+    /// the on-disk file untouched and rebuild from in-memory state.
+    private var refuseToOverwriteSidecar: Bool = false
 
     public init(storeURL: URL = FirstPromptCache.defaultStoreURL()) {
         self.storeURL = storeURL
@@ -106,7 +114,12 @@ public final class FirstPromptCache: @unchecked Sendable {
     public func save() {
         lock.lock()
         let snapshot = entries
+        let skip = refuseToOverwriteSidecar
         lock.unlock()
+        guard !skip else {
+            cacheLogger.info("first-prompt-cache skipping save — on-disk sidecar is from a newer schema version")
+            return
+        }
         let file = StoreFile(schemaVersion: Self.currentSchemaVersion, entries: snapshot)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -133,7 +146,18 @@ public final class FirstPromptCache: @unchecked Sendable {
             let data = try Data(contentsOf: storeURL)
             let decoder = JSONDecoder()
             let file = try decoder.decode(StoreFile.self, from: data)
-            if file.schemaVersion != Self.currentSchemaVersion {
+            if file.schemaVersion > Self.currentSchemaVersion {
+                // Newer-than-ours on disk (probably a future Clawdmeter
+                // build wrote v2). Don't load AND don't overwrite — the
+                // user might be downgrading. We rebuild from scratch in
+                // memory but leave the sidecar alone.
+                cacheLogger.warning("first-prompt-cache schema v\(file.schemaVersion) is newer than v\(Self.currentSchemaVersion); leaving sidecar untouched")
+                lock.lock()
+                refuseToOverwriteSidecar = true
+                lock.unlock()
+                return
+            }
+            if file.schemaVersion < Self.currentSchemaVersion {
                 cacheLogger.warning("first-prompt-cache schema v\(file.schemaVersion) (we expect v\(Self.currentSchemaVersion)); discarding")
                 return
             }

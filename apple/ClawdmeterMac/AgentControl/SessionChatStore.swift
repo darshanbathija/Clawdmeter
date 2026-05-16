@@ -68,11 +68,17 @@ public final class SessionChatStore: ObservableObject {
 
     @Published public private(set) var snapshot: ChatSnapshot = .empty
     /// Back-compat: views that still call `store.messages` keep working.
-    /// Derived from `snapshot.items`; populated on each snapshot commit.
-    /// Removed once all view code reads `snapshot.items` directly.
-    @Published public private(set) var messages: [ChatMessage] = []
+    /// Derived lazily from `snapshot.items` — was previously a parallel
+    /// `@Published` rebuilt on every 16ms commit (allocating a fresh
+    /// flat array on the main thread). With the snapshot now driving
+    /// all view invalidations, the read sites (PRMirror.findPRURL,
+    /// SessionsModel.filter search, PoppedChatThread ForEach) re-flatten
+    /// only when they actually consume it. ObservableObject notification
+    /// happens via `$snapshot` so subscribers still see updates.
+    public var messages: [ChatMessage] {
+        Self.flattenMessages(from: snapshot.items)
+    }
     @Published public private(set) var isLoading: Bool = true
-    @Published public private(set) var lastError: String?
     /// External plan text (from AgentSession.planText). When set, the
     /// next staging snapshot extracts steps from this text and merges
     /// them with steps found in chat messages. The view doesn't have to
@@ -158,10 +164,10 @@ public final class SessionChatStore: ObservableObject {
                     guard let self else { return }
                     guard self.parseGeneration == generation else { return }
                     self.snapshot = next
-                    // Back-compat: rebuild `messages` array from the
-                    // snapshot's items. Drops once all views read
-                    // snapshot.items directly.
-                    self.messages = Self.flattenMessages(from: next.items)
+                    // No `messages` rebuild here — it's a computed
+                    // property derived from `snapshot.items` on demand,
+                    // so we get a single objectWillChange per commit
+                    // rather than two parallel @Published mutations.
                 }
                 os_signpost(.end, log: chatPerfLog, name: "staging-parse-batch",
                             signpostID: signpostID)
@@ -176,7 +182,7 @@ public final class SessionChatStore: ObservableObject {
             if let id = self.startSignpostID {
                 os_signpost(.end, log: chatPerfLog, name: "session-open",
                             signpostID: id,
-                            "messageCount=%d", self.messages.count)
+                            "messageCount=%d", self.snapshot.items.count)
                 self.startSignpostID = nil
             }
         }
@@ -192,6 +198,17 @@ public final class SessionChatStore: ObservableObject {
         commitTask = nil
         tail?.stop()
         tail = nil
+    }
+
+    /// Safety net for the rare case where a caller drops the store
+    /// without calling `stop()` first. `commitTask` is detached and
+    /// keeps spinning the 16ms poll until cancelled; cancelling here
+    /// ensures the only way for the task to outlive the store is the
+    /// `[weak self]` guard at the MainActor hop (which still exits
+    /// cleanly, just one frame later than necessary).
+    deinit {
+        commitTask?.cancel()
+        tail?.stop()
     }
 
     /// T4: read the last ~256 KB of the JSONL, parse complete lines, and
@@ -260,16 +277,11 @@ public final class SessionChatStore: ObservableObject {
         return out
     }
 
-    // MARK: - Parsing
-    // The legacy main-actor `applyLine` + `handleUser` / `handleAssistant`
-    // path was replaced by the off-main `ParsedLine.from(json:)` →
-    // `StagingParser.ingest(_:)` pipeline. Helpers below
-    // (`summarizeInput`, `expandedDetail`, `flattenContent`,
-    // `parseTimestamp`) are marked `nonisolated` so ParsedLine.from can
-    // call them from any context.
-
-
     // MARK: - Helpers (used by ParsedLine.from)
+    // The legacy main-actor `applyLine` / `handleUser` / `handleAssistant`
+    // path was replaced by the off-main `ParsedLine.from(json:)` →
+    // `StagingParser.ingest(_:)` pipeline. Helpers below are marked
+    // `nonisolated` so ParsedLine.from can call them from any context.
 
     /// Generate a stable id from a JSON line's uuid/timestamp field.
     nonisolated static func stableId(_ json: [String: Any], suffix: String) -> String {

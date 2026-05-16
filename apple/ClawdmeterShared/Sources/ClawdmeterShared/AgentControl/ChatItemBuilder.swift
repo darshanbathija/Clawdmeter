@@ -178,6 +178,16 @@ public struct ChatItemBuilder: Sendable {
             let toolUseId = message.id.hasPrefix("call:")
                 ? String(message.id.dropFirst("call:".count))
                 : message.id
+            // Duplicate tool_use_id within the same pending run would
+            // overwrite the prior call (potentially dropping an
+            // already-paired result) and duplicate the id in
+            // pendingOrder. Keep the first instance; subsequent
+            // duplicates are silently dropped — the dedup-by-id contract
+            // is owned by the staging actor's seenIds before we get here,
+            // so this is defense-in-depth.
+            guard pendingPairs[toolUseId] == nil else {
+                return .pendingExtended(toolUseId: toolUseId)
+            }
             pendingPairs[toolUseId] = ToolPair(id: toolUseId, call: message, result: nil)
             pendingOrder.append(toolUseId)
             return .pendingExtended(toolUseId: toolUseId)
