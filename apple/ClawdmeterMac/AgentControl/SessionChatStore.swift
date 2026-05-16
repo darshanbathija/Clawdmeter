@@ -278,13 +278,43 @@ public final class SessionChatStore: ObservableObject {
     }
 
     /// Resolve the JSONL file for a session. Claude encodes the cwd as
-    /// `~/.claude/projects/<encoded>/<session-id>.jsonl`. We don't know the
-    /// session-id (Claude's own UUID); we pick the newest .jsonl in the
-    /// project dir as a best-effort match.
+    /// `~/.claude/projects/<encoded>/<session-id>.jsonl`, replacing `/`,
+    /// `_`, AND ` ` (and arguably more) with `-`. The naive `/`→`-` we used
+    /// pre-G2 silently missed any cwd containing underscores or spaces —
+    /// the very case in this repo (`/Users/darshanbathija_1/Downloads/CC Watch/...`).
+    ///
+    /// We also walk up parent directories: when Claude was launched from a
+    /// parent of the git repo (e.g. `CC Watch/` instead of `CC Watch/Clawdmeter/`),
+    /// the JSONLs are filed under the parent's encoded name. `RepoIdentity.normalize`
+    /// has already descended us into the git child, but the project dir is
+    /// for the parent. Walking up catches it.
     public static func resolveSessionFileURL(repoCwd: String) -> URL? {
-        let encoded = repoCwd.replacingOccurrences(of: "/", with: "-")
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/projects/\(encoded)")
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let projects = home.appendingPathComponent(".claude/projects")
+        var current = (repoCwd as NSString).standardizingPath
+        while !current.isEmpty, current != "/" {
+            if let url = newestJSONL(in: projects, claudeEncoded: encodeCwd(current)) {
+                return url
+            }
+            let parent = (current as NSString).deletingLastPathComponent
+            if parent == current { break }
+            current = parent
+        }
+        return nil
+    }
+
+    /// Claude's project-dir name encoding. `/`, `_`, and ` ` all collapse
+    /// to `-`. Letter case is preserved.
+    static func encodeCwd(_ cwd: String) -> String {
+        cwd
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+    }
+
+    private static func newestJSONL(in projects: URL, claudeEncoded: String) -> URL? {
+        let dir = projects.appendingPathComponent(claudeEncoded)
+        guard FileManager.default.fileExists(atPath: dir.path) else { return nil }
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.contentModificationDateKey]
         ) else { return nil }
