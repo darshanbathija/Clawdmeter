@@ -503,6 +503,14 @@ public final class AgentControlServer {
             let withoutPrefix = String(path.dropFirst("/sessions/".count))
             let sessionIdRaw = String(withoutPrefix.dropLast("/approve-plan".count))
             await handleApprovePlan(sessionId: sessionIdRaw, connection: connection)
+        case ("POST", let path) where path.hasSuffix("/archive") && path.hasPrefix("/sessions/"):
+            let withoutPrefix = String(path.dropFirst("/sessions/".count))
+            let sessionIdRaw = String(withoutPrefix.dropLast("/archive".count))
+            handleArchive(sessionId: sessionIdRaw, archived: true, connection: connection)
+        case ("POST", let path) where path.hasSuffix("/unarchive") && path.hasPrefix("/sessions/"):
+            let withoutPrefix = String(path.dropFirst("/sessions/".count))
+            let sessionIdRaw = String(withoutPrefix.dropLast("/unarchive".count))
+            handleArchive(sessionId: sessionIdRaw, archived: false, connection: connection)
         case ("GET", "/sessions/needs-attention"):
             await handleGetNeedsAttention(connection: connection)
         case ("GET", "/health"):
@@ -684,6 +692,28 @@ public final class AgentControlServer {
             serverLogger.error("approve-plan failed: \(error.localizedDescription, privacy: .public)")
             sendResponse(.internalError, on: connection)
         }
+    }
+
+    /// Archive / unarchive a session (G7). Hides it from the default
+    /// sidebar but the JSONL + worktree stay on disk. Reversible by
+    /// POSTing `/unarchive`.
+    private func handleArchive(
+        sessionId: String,
+        archived: Bool,
+        connection: NWConnection
+    ) {
+        guard let uuid = UUID(uuidString: sessionId),
+              registry.session(id: uuid) != nil
+        else {
+            sendResponse(.notFound, on: connection)
+            return
+        }
+        if archived {
+            registry.archive(id: uuid)
+        } else {
+            registry.unarchive(id: uuid)
+        }
+        sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
     }
 
     private func handleDeleteSession(sessionId: String, connection: NWConnection) async {

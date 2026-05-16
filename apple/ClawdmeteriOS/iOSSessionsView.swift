@@ -7,6 +7,8 @@ struct iOSSessionsView: View {
     @ObservedObject var client: AgentControlClient
     @State private var showingPairing: Bool = false
     @State private var showingNewSession: Bool = false
+    @State private var searchQuery: String = ""
+    @State private var showArchived: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -33,6 +35,8 @@ struct iOSSessionsView: View {
                         Button("Refresh") {
                             Task { await client.refreshAll() }
                         }
+                        Toggle("Show archived", isOn: $showArchived)
+                        Divider()
                         Button("Pair to Mac…") {
                             showingPairing = true
                         }
@@ -99,11 +103,11 @@ struct iOSSessionsView: View {
 
     private var repoList: some View {
         List {
-            ForEach(client.repos, id: \.key) { repo in
+            ForEach(filteredRepos, id: \.key) { repo in
                 Section {
-                    let sessions = client.sessions.filter { $0.repoKey == repo.key }
-                    if sessions.isEmpty {
-                        Text("No active sessions")
+                    let sessions = sessionsForRepo(repo)
+                    if sessions.isEmpty && repo.recentSessions.isEmpty {
+                        Text("No sessions yet — tap ＋ to start one")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -113,18 +117,86 @@ struct iOSSessionsView: View {
                             } label: {
                                 SessionRow(session: session)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if session.archivedAt == nil {
+                                    Button {
+                                        Task { await client.archiveSession(id: session.id) }
+                                    } label: {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                    .tint(.orange)
+                                } else {
+                                    Button {
+                                        Task { await client.unarchiveSession(id: session.id) }
+                                    } label: {
+                                        Label("Unarchive", systemImage: "archivebox.fill")
+                                    }
+                                    .tint(.blue)
+                                }
+                                Button(role: .destructive) {
+                                    Task { await client.deleteSession(id: session.id) }
+                                } label: {
+                                    Label("End", systemImage: "stop.circle")
+                                }
+                            }
+                        }
+                        if !repo.recentSessions.isEmpty {
+                            recentSessionsHeader
+                            ForEach(repo.recentSessions) { recent in
+                                NavigationLink {
+                                    OutsideSessionDetailView(
+                                        recent: recent, repo: repo, client: client
+                                    )
+                                } label: {
+                                    RecentSessionRow(recent: recent)
+                                }
+                            }
                         }
                     }
                 } header: {
                     HStack {
                         Text(repo.displayName)
                         Spacer()
-                        if repo.hasActiveSessions {
+                        if repo.liveSessionCount > 0 {
+                            Circle().fill(.green).frame(width: 6, height: 6)
+                        } else if repo.hasActiveSessions {
                             Circle().fill(terraCotta).frame(width: 6, height: 6)
                         }
                     }
                 }
             }
+        }
+        .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Search sessions")
+    }
+
+    private var recentSessionsHeader: some View {
+        Text("Recent (last 30 days)")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .listRowBackground(Color.clear)
+    }
+
+    /// Repos filtered by search query + archive toggle. When the user has
+    /// typed a query we keep repos whose name matches OR which have at
+    /// least one matching session/goal.
+    private var filteredRepos: [AgentRepo] {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return client.repos }
+        return client.repos.filter { repo in
+            if repo.displayName.lowercased().contains(q) { return true }
+            let matches = sessionsForRepo(repo).contains { s in
+                (s.goal ?? "").lowercased().contains(q)
+            }
+            return matches
+        }
+    }
+
+    private func sessionsForRepo(_ repo: AgentRepo) -> [AgentSession] {
+        client.sessions.filter { s in
+            guard s.repoKey == repo.key else { return false }
+            if !showArchived, s.archivedAt != nil { return false }
+            return true
         }
     }
 
@@ -170,6 +242,97 @@ private struct SessionRow: View {
         case .done: return Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0)
         case .degraded: return .secondary
         }
+    }
+}
+
+/// One row in the iOS sidebar for a JSONL outside-Clawdmeter session
+/// (Conductor / Cursor / Terminal-launched) found within the last 30
+/// days. Tap opens a read-only chat — composer hidden, swipe actions
+/// stripped, "Read-only" badge in the detail header.
+private struct RecentSessionRow: View {
+    let recent: RecentSession
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(isLive ? Color.green : Color.secondary.opacity(0.5))
+                .frame(width: 7, height: 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "eye")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        }
+    }
+
+    private var isLive: Bool {
+        Date().timeIntervalSince(recent.lastModified) < 5 * 60
+    }
+
+    private var title: String {
+        let provider = recent.provider == .claude ? "Claude" : "Codex"
+        return isLive ? "\(provider) · live now" : "\(provider) session"
+    }
+
+    private var subtitle: String {
+        let rel = RelativeDateTimeFormatter()
+        rel.unitsStyle = .short
+        return "\(rel.localizedString(for: recent.lastModified, relativeTo: Date())) · read-only"
+    }
+}
+
+/// Detail view for an outside-Clawdmeter recent JSONL. Mirrors
+/// `SessionDetailView` but with composer / delete actions hidden and a
+/// "Read-only" badge prominent in the header. The structured view shows
+/// the goal + recent-session metadata; the terminal view is not offered
+/// (the JSONL is historical, not a live tmux pane).
+private struct OutsideSessionDetailView: View {
+    let recent: RecentSession
+    let repo: AgentRepo
+    @ObservedObject var client: AgentControlClient
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 6) {
+                    Circle().fill(.green).frame(width: 8, height: 8)
+                    Text("\(repo.displayName) · \(recent.provider == .claude ? "Claude" : "Codex")")
+                        .font(.headline)
+                    Spacer()
+                    Text("Read-only")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.green.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.green)
+                }
+                Text("This session was started outside Clawdmeter (Conductor, Cursor, or a Terminal-launched agent). The full transcript is on your Mac — Clawdmeter can't drive these sessions over Tailscale yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                LabeledContent("JSONL path") {
+                    Text(recent.path)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .truncationMode(.middle)
+                }
+                LabeledContent("Last write") {
+                    Text(recent.lastModified, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(16)
+        }
+        .navigationTitle(repo.displayName)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

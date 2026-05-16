@@ -152,6 +152,59 @@ public final class AgentControlClient: ObservableObject {
     }
 
     @MainActor
+    public func archiveSession(id: UUID) async {
+        guard let request = makeRequest(path: "/sessions/\(id.uuidString)/archive", method: "POST") else { return }
+        do {
+            _ = try await URLSession.shared.data(for: request)
+            // Optimistic local update — server will confirm on next refresh.
+            if let idx = sessions.firstIndex(where: { $0.id == id }) {
+                let s = sessions[idx]
+                sessions[idx] = AgentSession(
+                    id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
+                    agent: s.agent, model: s.model, goal: s.goal,
+                    worktreePath: s.worktreePath,
+                    tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
+                    status: s.status, planText: s.planText,
+                    createdAt: s.createdAt, lastEventAt: Date(),
+                    lastEventSeq: s.lastEventSeq,
+                    mode: s.mode, archivedAt: Date(),
+                    terminalPanes: s.terminalPanes,
+                    scheduledFollowUps: s.scheduledFollowUps,
+                    parentSessionId: s.parentSessionId
+                )
+            }
+        } catch {
+            self.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    public func unarchiveSession(id: UUID) async {
+        guard let request = makeRequest(path: "/sessions/\(id.uuidString)/unarchive", method: "POST") else { return }
+        do {
+            _ = try await URLSession.shared.data(for: request)
+            if let idx = sessions.firstIndex(where: { $0.id == id }) {
+                let s = sessions[idx]
+                sessions[idx] = AgentSession(
+                    id: s.id, repoKey: s.repoKey, repoDisplayName: s.repoDisplayName,
+                    agent: s.agent, model: s.model, goal: s.goal,
+                    worktreePath: s.worktreePath,
+                    tmuxWindowId: s.tmuxWindowId, tmuxPaneId: s.tmuxPaneId,
+                    status: s.status, planText: s.planText,
+                    createdAt: s.createdAt, lastEventAt: Date(),
+                    lastEventSeq: s.lastEventSeq,
+                    mode: s.mode, archivedAt: nil,
+                    terminalPanes: s.terminalPanes,
+                    scheduledFollowUps: s.scheduledFollowUps,
+                    parentSessionId: s.parentSessionId
+                )
+            }
+        } catch {
+            self.lastError = error.localizedDescription
+        }
+    }
+
+    @MainActor
     public func fetchNeedsAttention() async -> [NotificationEvent] {
         guard let request = makeRequest(path: "/sessions/needs-attention") else { return [] }
         do {

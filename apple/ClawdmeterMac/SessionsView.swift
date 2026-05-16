@@ -401,6 +401,15 @@ public final class SessionsModel: ObservableObject {
     /// Spawn a new Clawdmeter-owned session. The caller picks Local vs
     /// Worktree via the mode picker; for Worktree we create the directory
     /// via WorktreeManager and spawn the agent there.
+    public enum SpawnError: LocalizedError {
+        case missingBinary(String)
+        public var errorDescription: String? {
+            switch self {
+            case .missingBinary(let m): return m
+            }
+        }
+    }
+
     public func spawnSession(
         repoPath: String,
         agent: AgentKind,
@@ -409,6 +418,12 @@ public final class SessionsModel: ObservableObject {
         mode: SessionMode,
         tmux: TmuxControlClient
     ) async throws -> AgentSession {
+        // Fail fast on missing CLIs rather than spawning tmux + the
+        // worktree only to error in the agent's pane (where the user
+        // can't easily see it without opening the terminal view).
+        if let reason = AgentSpawner.preflight() {
+            throw SpawnError.missingBinary(reason)
+        }
         try await tmux.start()
         var cwd = repoPath
         var worktreePath: String? = nil
