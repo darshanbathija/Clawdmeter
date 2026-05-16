@@ -102,11 +102,13 @@ struct iOSTerminalTabsView: View {
             HStack(spacing: 6) {
                 Image(systemName: pane.isPrimary ? "rectangle.inset.filled" : "rectangle")
                     .font(.caption)
+                    .accessibilityHidden(true)
                 Text(label)
                     .font(.caption.weight(selected ? .semibold : .regular))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .frame(minHeight: 44)
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(selected ? SessionsV2Theme.accent.opacity(0.18) : Color.secondary.opacity(0.08))
@@ -115,8 +117,16 @@ struct iOSTerminalTabsView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(selected ? SessionsV2Theme.accent : .clear, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(pane.isPrimary ? "Primary pane" : "Pane") \(label)")
+        .accessibilityHint(pane.isPrimary
+            ? "Double-tap to view the agent's main terminal."
+            : "Double-tap to switch panes. Long-press for rename or delete."
+        )
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .contextMenu {
             if !pane.isPrimary {
                 Button(role: .destructive) {

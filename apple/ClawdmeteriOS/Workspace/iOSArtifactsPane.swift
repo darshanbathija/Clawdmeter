@@ -56,7 +56,8 @@ struct iOSArtifactsPane: View {
     }
 
     private func row(for entry: ArtifactEntry) -> some View {
-        Button {
+        let isDownloading = downloading == entry.path
+        return Button {
             Task { await open(entry) }
         } label: {
             HStack(spacing: 12) {
@@ -64,6 +65,7 @@ struct iOSArtifactsPane: View {
                     .font(.title3)
                     .foregroundStyle(SessionsV2Theme.accent)
                     .frame(width: 32)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.filename)
                         .font(.callout)
@@ -76,18 +78,25 @@ struct iOSArtifactsPane: View {
                         .truncationMode(.head)
                 }
                 Spacer()
-                if downloading == entry.path {
+                if isDownloading {
                     ProgressView()
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
             }
             .padding(.vertical, 4)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(downloading != nil)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(entry.filename)
+        .accessibilityValue(isDownloading ? "Downloading" : entry.path)
+        .accessibilityHint("Double-tap to preview.")
     }
 
     private func icon(for filename: String) -> String {
