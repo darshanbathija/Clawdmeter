@@ -17,7 +17,20 @@ public actor AuditLog {
     private let rootDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let dir = home.appendingPathComponent(".clawdmeter/audit", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            // Owner-only — keeps peer IPs + repo paths private on a
+            // multi-user Mac. macOS's default umask is 0o022 (others
+            // can read), and the audit JSONL contains identifying
+            // metadata even when prompt text is hashed.
+            attributes: [.posixPermissions: 0o700]
+        )
+        // The directory may already exist from a prior run on default
+        // umask. Tighten its mode unconditionally.
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: dir.path
+        )
         return dir
     }()
 
@@ -100,6 +113,12 @@ public actor AuditLog {
             }
         } else {
             try? line.write(to: url, options: [.atomic])
+            // Owner-only — tighten on first create. Matches the rootDir
+            // 0o700 so a multi-user Mac can't sidestep the directory's
+            // permission via the file.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path
+            )
         }
     }
 

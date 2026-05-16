@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ClawdmeterShared
 import OSLog
 
@@ -198,13 +199,75 @@ public final class AgentControlClient: ObservableObject {
         }
     }
 
+    /// Delete a pane by its `TerminalPaneRef.id` (not the tmux pane id).
+    /// Daemon's DELETE handler matches on the ref UUID, not the underlying
+    /// tmux pane id.
     @MainActor
-    public func deleteTerminal(sessionId: UUID, paneId: String) async {
+    public func deleteTerminal(sessionId: UUID, terminalRefId: UUID) async {
         guard let request = makeRequest(
-            path: "/sessions/\(sessionId.uuidString)/terminals/\(paneId)",
+            path: "/sessions/\(sessionId.uuidString)/terminals/\(terminalRefId.uuidString)",
             method: "DELETE"
         ) else { return }
         _ = try? await URLSession.shared.data(for: request)
+    }
+
+    public enum ArtifactError: LocalizedError {
+        case notPaired
+        case badStatus(Int)
+        case ioError(String)
+        public var errorDescription: String? {
+            switch self {
+            case .notPaired: return "Not paired to a Mac"
+            case .badStatus(let code): return "Daemon returned HTTP \(code)"
+            case .ioError(let msg): return msg
+            }
+        }
+    }
+
+    /// Fetch artifact bytes via `GET /sessions/:id/artifact?path=…` and
+    /// write them to a tempdir for `QLPreviewController`. The local
+    /// filename is a SHA-256 of the remote path (with the original
+    /// extension preserved) so two artifacts with the same basename in
+    /// different remote directories don't collide. If the cached file
+    /// already exists, the function returns it without re-fetching.
+    @MainActor
+    public func downloadArtifact(sessionId: UUID, remotePath: String) async throws -> URL {
+        guard let host, let token else { throw ArtifactError.notPaired }
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clawdmeter-artifacts/\(sessionId.uuidString)")
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let localURL = cacheDir.appendingPathComponent(Self.cacheFilename(forRemotePath: remotePath))
+        // Cache hit — return without round-tripping the daemon. Comment
+        // in the previous shape claimed this was already happening; now
+        // the code matches the claim.
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return localURL
+        }
+        var comps = URLComponents()
+        comps.scheme = "http"
+        comps.host = host
+        comps.port = httpPort
+        comps.path = "/sessions/\(sessionId.uuidString)/artifact"
+        comps.queryItems = [URLQueryItem(name: "path", value: remotePath)]
+        guard let url = comps.url else { throw ArtifactError.ioError("bad URL") }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 30
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw ArtifactError.badStatus(http.statusCode)
+        }
+        try data.write(to: localURL, options: .atomic)
+        return localURL
+    }
+
+    /// SHA-256 the full remote path so cache files don't collide on
+    /// basename. Preserve the extension so QLPreview infers the type.
+    private static func cacheFilename(forRemotePath remotePath: String) -> String {
+        let digest = SHA256.hash(data: Data(remotePath.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        let ext = (remotePath as NSString).pathExtension
+        return ext.isEmpty ? hex : "\(hex).\(ext)"
     }
 
     @MainActor

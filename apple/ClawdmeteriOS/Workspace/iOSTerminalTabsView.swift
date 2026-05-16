@@ -13,6 +13,7 @@ struct iOSTerminalTabsView: View {
     @State private var panes: [TerminalPaneRef] = []
     @State private var selectedPaneId: String? = nil
     @State private var isAdding = false
+    @State private var addDraft: String = ""
     @State private var renameTarget: TerminalPaneRef? = nil
     @State private var renameDraft: String = ""
 
@@ -24,8 +25,8 @@ struct iOSTerminalTabsView: View {
         }
         .task(id: session.id) { await reload() }
         .alert("New terminal", isPresented: $isAdding) {
-            TextField("Pane title (optional)", text: $renameDraft)
-            Button("Cancel", role: .cancel) { renameDraft = "" }
+            TextField("Pane title (optional)", text: $addDraft)
+            Button("Cancel", role: .cancel) { addDraft = "" }
             Button("Create") { Task { await addPane() } }
         } message: {
             Text("Spawns a new tmux pane in this session.")
@@ -36,10 +37,32 @@ struct iOSTerminalTabsView: View {
         )) {
             TextField("Title", text: $renameDraft)
             Button("Cancel", role: .cancel) { renameTarget = nil; renameDraft = "" }
-            Button("Save") { renameTarget = nil; renameDraft = "" }
+            Button("Save") { applyRename() }
         } message: {
-            Text("Renaming is local-only in v2.0; persisted in v2.0.1.")
+            Text("Local-only in v2.0.1 — the chip label updates here but the daemon doesn't persist it yet.")
         }
+    }
+
+    /// Apply a local rename to the panes array. Daemon-side persistence
+    /// is a future endpoint (a `PATCH /sessions/:id/terminals/:refId`
+    /// is the natural shape); until that ships the new title lives only
+    /// for the lifetime of this view.
+    private func applyRename() {
+        defer {
+            renameTarget = nil
+            renameDraft = ""
+        }
+        guard let target = renameTarget else { return }
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let idx = panes.firstIndex(where: { $0.id == target.id }) else { return }
+        let old = panes[idx]
+        panes[idx] = TerminalPaneRef(
+            id: old.id,
+            paneId: old.paneId,
+            title: trimmed,
+            isPrimary: old.isPrimary,
+            createdAt: old.createdAt
+        )
     }
 
     @ViewBuilder
@@ -113,7 +136,7 @@ struct iOSTerminalTabsView: View {
 
     private var addButton: some View {
         Button {
-            renameDraft = ""
+            addDraft = ""
             isAdding = true
         } label: {
             Image(systemName: "plus.circle.fill")
@@ -161,8 +184,8 @@ struct iOSTerminalTabsView: View {
     }
 
     private func addPane() async {
-        let title = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        renameDraft = ""
+        let title = addDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        addDraft = ""
         if let added = await client.addTerminal(sessionId: session.id, title: title) {
             panes.append(added)
             selectedPaneId = added.paneId
@@ -170,7 +193,12 @@ struct iOSTerminalTabsView: View {
     }
 
     private func deletePane(_ pane: TerminalPaneRef) async {
-        await client.deleteTerminal(sessionId: session.id, paneId: pane.paneId)
+        // Daemon's DELETE handler matches on TerminalPaneRef.id (a UUID),
+        // NOT the tmux pane id (e.g. "%14"). The two collided in the v2
+        // ship — sending pane.paneId here always 404s. Send the ref UUID;
+        // local panes/selectedPaneId still key off the tmux paneId since
+        // that's what the WS envelope expects.
+        await client.deleteTerminal(sessionId: session.id, terminalRefId: pane.id)
         panes.removeAll { $0.paneId == pane.paneId }
         if selectedPaneId == pane.paneId {
             selectedPaneId = panes.first?.paneId

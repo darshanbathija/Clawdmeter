@@ -264,7 +264,7 @@ struct WireInspectorPane: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Toggle(isOn: $enabled) {
-                    Text("Record HTTP/WS payloads")
+                    Text("Record HTTP payloads")
                 }
                 .toggleStyle(.switch)
                 .onChange(of: enabled) { _, on in
@@ -278,7 +278,7 @@ struct WireInspectorPane: View {
             }
             TextField("Filter path or peer", text: $query)
                 .textFieldStyle(.roundedBorder)
-            Text("Capped at 500 entries (~5MB). Bodies under 16KB sniff JSON; larger payloads stub as `NB <content-type>`.")
+            Text("Capped at 500 entries (~5MB). Body text appears only when Privacy → Audit log: include plaintext is on; otherwise the inspector shows shape + byte count only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

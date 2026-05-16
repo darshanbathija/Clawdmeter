@@ -44,6 +44,13 @@ public final class AgentControlServer {
     private let registry: AgentSessionRegistry
     private let tmux: TmuxControlClient
     private let notifications: NotificationDispatcher
+    /// T18 Wire Inspector: per-connection request context so the
+    /// outgoing-response recorder can tag entries with the original
+    /// method+path. Each NWConnection serves one request before
+    /// `connection.cancel()` runs in sendResponse's completion handler,
+    /// so the dict never has more than one entry per connection at a
+    /// time. Cleared in sendResponse after the response is queued.
+    private var pendingRequests: [ObjectIdentifier: (method: String, path: String)] = [:]
     /// Wired by AppRuntime after construction so the iPhone can pull live
     /// Claude/Codex usage AND the historical analytics snapshot over
     /// Tailscale instead of needing iCloud KV sync. Nil-tolerant — the
@@ -507,7 +514,10 @@ public final class AgentControlServer {
         }
 
         // T18 Wire Inspector: record the incoming request body when enabled.
+        // Also stash the request context so sendResponse can tag the
+        // matching outbound entry with the right method+path.
         let peerString = Self.endpointString(connection.endpoint)
+        pendingRequests[ObjectIdentifier(connection)] = (request.method, request.path)
         await WireInspector.shared.recordRequest(
             method: request.method, path: request.path, peer: peerString,
             body: request.body.isEmpty ? nil : request.body,
@@ -669,7 +679,7 @@ public final class AgentControlServer {
             sendResponse(.badRequest, on: connection); return
         }
         guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
-            sendResponse(.tooManyRequests, on: connection); return
+            sendResponse(.tooManyRequestsSwap, on: connection); return
         }
         let oldModel = session.model
         registry.setModel(id: uuid, model: req.model, effort: req.effort)
@@ -689,7 +699,7 @@ public final class AgentControlServer {
             sendResponse(.badRequest, on: connection); return
         }
         guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
-            sendResponse(.tooManyRequests, on: connection); return
+            sendResponse(.tooManyRequestsSwap, on: connection); return
         }
         registry.setEffort(id: uuid, effort: req.effort)
         let peer = Self.endpointString(connection.endpoint)
@@ -712,7 +722,7 @@ public final class AgentControlServer {
             sendResponse(.badRequest, on: connection); return
         }
         guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
-            sendResponse(.tooManyRequests, on: connection); return
+            sendResponse(.tooManyRequestsSwap, on: connection); return
         }
         registry.updateRuntime(
             id: uuid,
@@ -753,7 +763,7 @@ public final class AgentControlServer {
             sendResponse(.internalError, on: connection); return
         }
         guard RateLimiter.shared.tryAcquireSend(sessionId: uuid) else {
-            sendResponse(.tooManyRequests, on: connection); return
+            sendResponse(.tooManyRequestsSend, on: connection); return
         }
         do {
             let data = Data(bytes)
@@ -790,6 +800,11 @@ public final class AgentControlServer {
         }
         guard let req = try? JSONDecoder().decode(AutopilotRequest.self, from: request.body) else {
             sendResponse(.badRequest, on: connection); return
+        }
+        // Autopilot crosses a real security boundary (per-repo trust list).
+        // Throttle the toggle so a misbehaving client can't flap it.
+        guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
+            sendResponse(.tooManyRequestsSwap, on: connection); return
         }
         AutopilotState.shared.setEnabled(req.enabled, sessionId: uuid)
         let peer = Self.endpointString(connection.endpoint)
@@ -981,14 +996,32 @@ public final class AgentControlServer {
             sendResponse(.badRequest, on: connection); return
         }
         let repoCwd = session.worktreePath ?? session.repoKey
+        // Defense-in-depth: refuse to anchor on an empty or non-absolute
+        // repoCwd. If the worktree/repo path is missing the prefix check
+        // below degenerates (`hasPrefix("/")` matches every absolute
+        // path) and the symlink resolve can't constrain anything either.
+        guard !repoCwd.isEmpty, repoCwd.hasPrefix("/") else {
+            sendResponse(.internalError, on: connection); return
+        }
         let absolute: String = pathArg.hasPrefix("/")
             ? pathArg
             : (repoCwd as NSString).appendingPathComponent(pathArg)
-        // Resolve symlinks + canonicalize, then require the path to live
-        // under repoCwd. Prevents `?path=../../../etc/passwd` shenanigans.
-        let resolved = (absolute as NSString).standardizingPath
+        // Two-stage path safety:
+        //   1. Canonicalize `..` / `~` / `//` via standardizingPath, then
+        //      require the result to live under the repo root. Blocks
+        //      `?path=../../../etc/passwd`.
+        //   2. Resolve symlinks via `resolvingSymlinksInPath` and re-check
+        //      the prefix. Blocks an agent (or anyone with worktree write
+        //      access) from planting a symlink inside the worktree that
+        //      points outside it. standardizingPath alone does NOT resolve
+        //      symlinks, so without step 2 the read would follow the link.
         let repoStandard = (repoCwd as NSString).standardizingPath
-        guard resolved.hasPrefix(repoStandard + "/") || resolved == repoStandard else {
+        let canonical = (absolute as NSString).standardizingPath
+        let resolved = (canonical as NSString).resolvingSymlinksInPath
+        let repoResolved = (repoStandard as NSString).resolvingSymlinksInPath
+        let underCanonicalRepo = canonical.hasPrefix(repoStandard + "/") || canonical == repoStandard
+        let underResolvedRepo = resolved.hasPrefix(repoResolved + "/") || resolved == repoResolved
+        guard underCanonicalRepo && underResolvedRepo else {
             sendResponse(HTTPResponse(
                 status: 403, reason: "Forbidden",
                 contentType: "text/plain",
@@ -1387,16 +1420,11 @@ public final class AgentControlServer {
             sendResponse(.notFound, on: connection)
             return
         }
-        // T13: plan approval is a mid-session respawn that exits plan mode
-        // and gives the agent edit permission. Track it in the swap audit
-        // log so the Diagnostics viewer (T17) sees it alongside model/
-        // effort/mode swaps.
-        let peer = Self.endpointString(connection.endpoint)
-        await AuditLog.shared.recordSwap(
-            sessionId: uuid, sourcePeer: peer,
-            from: session.model, to: session.model ?? "(default)",
-            effort: "(plan-approve agent=\(session.agent.rawValue))"
-        )
+        // Approve-plan is functionally a swap (kill pane + respawn). Use
+        // the swap rate-limit so a misbehaving client can't flap approval.
+        guard RateLimiter.shared.tryAcquireSwap(sessionId: uuid) else {
+            sendResponse(.tooManyRequestsSwap, on: connection); return
+        }
         // Per D13: kill the plan-mode pane, spawn a fresh execution pane
         // in the same window. Overlay covers the swap UI-side.
         //
@@ -1447,6 +1475,16 @@ public final class AgentControlServer {
                 sessionId: uuid,
                 kind: .statusChanged,
                 payload: ["status": "running", "newWindowId": newWindow]
+            )
+            // T13: plan approval is a mid-session respawn that exits plan
+            // mode and gives the agent edit permission. Recorded AFTER the
+            // respawn succeeds — a failed approval shouldn't leave an
+            // audit entry implying it landed.
+            let peer = Self.endpointString(connection.endpoint)
+            await AuditLog.shared.recordSwap(
+                sessionId: uuid, sourcePeer: peer,
+                from: session.model, to: session.model ?? "(default)",
+                effort: "(plan-approve agent=\(session.agent.rawValue))"
             )
             sendResponse(.ok(contentType: "application/json", body: Data(#"{"ok":true}"#.utf8)), on: connection)
         } catch {
@@ -1571,12 +1609,17 @@ public final class AgentControlServer {
         let reason: String
         let contentType: String
         let body: Data
+        /// Extra response headers (e.g. `Retry-After`). Emitted verbatim
+        /// after the standard headers in `httpResponseBytes`. Empty for
+        /// most responses; the static `tooManyRequests` factories set it.
+        let extraHeaders: [(String, String)]
 
-        init(status: Int, reason: String, contentType: String, body: Data) {
+        init(status: Int, reason: String, contentType: String, body: Data, extraHeaders: [(String, String)] = []) {
             self.status = status
             self.reason = reason
             self.contentType = contentType
             self.body = body
+            self.extraHeaders = extraHeaders
         }
 
         static func ok(contentType: String, body: Data) -> HTTPResponse {
@@ -1598,10 +1641,22 @@ public final class AgentControlServer {
             status: 500, reason: "Internal Server Error",
             contentType: "text/plain", body: Data("Internal Server Error\n".utf8)
         )
-        static let tooManyRequests = HTTPResponse(
+        /// Generic 429 (kept for the dispatch-time auth/peer rejection
+        /// path). Prefer `tooManyRequestsSend` / `tooManyRequestsSwap` from
+        /// the per-handler call sites — those set a real `Retry-After`.
+        static let tooManyRequests = tooManyRequestsSwap
+
+        static let tooManyRequestsSend = HTTPResponse(
             status: 429, reason: "Too Many Requests",
             contentType: "application/json",
-            body: Data(#"{"error":"rate_limited","retryAfter":"see Retry-After"}"#.utf8)
+            body: Data(#"{"error":"rate_limited","retryAfterSeconds":1}"#.utf8),
+            extraHeaders: [("Retry-After", "1")]
+        )
+        static let tooManyRequestsSwap = HTTPResponse(
+            status: 429, reason: "Too Many Requests",
+            contentType: "application/json",
+            body: Data(#"{"error":"rate_limited","retryAfterSeconds":5}"#.utf8),
+            extraHeaders: [("Retry-After", "5")]
         )
     }
 
@@ -1610,19 +1665,25 @@ public final class AgentControlServer {
             status: response.status,
             statusText: response.reason,
             contentType: response.contentType,
-            body: response.body
+            body: response.body,
+            extraHeaders: response.extraHeaders
         )
         // T18 Wire Inspector: record outgoing response on a best-effort
         // Task; bypassing the actor would let the inspector skew under
-        // load. The detached Task here is fine — outbound recording is
-        // pure observation, not load-bearing.
+        // load. Read the request context stashed in dispatch() so the
+        // outbound row carries the original method+path (without this,
+        // every response showed `— —`, useless for request/response
+        // correlation).
         let peerString = Self.endpointString(connection.endpoint)
+        let ctx = pendingRequests.removeValue(forKey: ObjectIdentifier(connection))
+        let method = ctx?.method ?? "—"
+        let path = ctx?.path ?? "—"
         let status = response.status
         let contentType = response.contentType
         let body = response.body
         Task.detached { @Sendable in
             await WireInspector.shared.recordResponse(
-                method: "—", path: "—", peer: peerString,
+                method: method, path: path, peer: peerString,
                 status: status, body: body.isEmpty ? nil : body,
                 contentType: contentType
             )
@@ -1644,13 +1705,17 @@ public final class AgentControlServer {
         status: Int,
         statusText: String,
         contentType: String,
-        body: Data
+        body: Data,
+        extraHeaders: [(String, String)] = []
     ) -> Data {
         var out = Data()
         out.append(Data("HTTP/1.1 \(status) \(statusText)\r\n".utf8))
         out.append(Data("Content-Type: \(contentType)\r\n".utf8))
         out.append(Data("Content-Length: \(body.count)\r\n".utf8))
         out.append(Data("Connection: close\r\n".utf8))
+        for (name, value) in extraHeaders {
+            out.append(Data("\(name): \(value)\r\n".utf8))
+        }
         out.append(Data("\r\n".utf8))
         out.append(body)
         return out
