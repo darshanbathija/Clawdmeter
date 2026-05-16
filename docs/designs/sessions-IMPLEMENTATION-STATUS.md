@@ -5,10 +5,14 @@ lives at [`use-tailscale-ssh-for-modular-fern.md`](/Users/darshanbathija_1/.clau
 the CEO scope decisions live at [`sessions-control-plane.md`](./sessions-control-plane.md).
 This file maps tasks to commits + tracks done vs left.
 
-## Status: Phase 0–5 + T17 + T23 complete. T24 deferred (design API rate-limited).
+## Status: Phase 0–5 + T17 + T23 + Phase G0–G3 (Codex parity) all shipped.
 
 All three platform schemes (Mac / iOS / Watch) build clean.
-**90 / 90 tests pass** (71 ClawdmeterShared + 19 tmux-cc-probe).
+**98 / 98 tests pass** (79 ClawdmeterShared + 19 tmux-cc-probe). G19
+closed N/A (tmux-confined agents can't request desktop control). G20
+multi-Mac federation deferred (requires a second Mac in the tailnet to
+test; protocol stays forward-compatible). T24 visual mockups still
+deferred on design-API rate limit.
 
 ## Done ✅
 
@@ -84,12 +88,102 @@ All three platform schemes (Mac / iOS / Watch) build clean.
 - `PlanApprovalView.swift` (Watch) — modal sheet with goal + plan
   summary + terra-cotta Approve button.
 
+### Phase G0 — Codex 3-pane workspace parity (commit `a83919b`)
+- G1+G2+G3+G4+G5: `SessionWorkspaceView` (HSplitView with sidebar | chat
+  | review), `ModePicker` (Local|Worktree|Cloud-disabled chip control,
+  mid-session restart via D13 overlay), `GitDiffPane` (live `git diff
+  HEAD` with per-hunk Stage/Revert + Commit sheet + vnode watch on
+  `.git/index`), `MarkdownRenderer` (`AttributedString(markdown:)` with
+  fenced code blocks), `PlanTrackerPane` (vertical step timeline +
+  auto-complete heuristic + manual tap-toggle).
+- Protocol gains `SessionMode` + `AgentSession.{mode, archivedAt}` with
+  back-compat decoder. 4 new ProtocolTests for SessionMode round-trip +
+  legacy decode → infer mode from worktreePath.
+
+### Phase G1 — Power features (commits `a83919b` + `4f2d549`)
+- G6 sidebar search + Cmd+Shift+F focus.
+- G7 archive (`archivedAt`) + context menu + Show-archived toggle.
+- G8 keyboard nav: Cmd+1..9 jump to Nth visible session, Cmd+N new
+  session, Cmd+W toggle review pane.
+- G9 `SourcesPane` — file + URL citations from Read/Grep/Glob/WebFetch
+  tool_use blocks, click → reveal in Finder / open URL.
+- G10 `ArtifactsPane` — thumbnail grid + `QLPreviewView` overlay for
+  PDF/image/doc artifacts.
+- G11 `SpeechDictation` — SFSpeechRecognizer + AVAudioEngine; Ctrl+M
+  toggles, partial transcripts append live; Info.plist gains
+  NSSpeechRecognitionUsageDescription + NSMicrophoneUsageDescription.
+
+### Phase G2 — Workspace depth (commit `b879b35`)
+- Protocol gains `TerminalPaneRef`, `ScheduledFollowUp`,
+  `AgentSession.{terminalPanes, scheduledFollowUps, parentSessionId}`.
+  `sessions.json` bumped to schema v2 with back-compat decoder.
+- G12 multi-terminal: `TmuxControlClient.splitWindow` + `killPane`,
+  `AgentControlServer` honors optional `paneId` in WS envelope,
+  `MacTerminalView` accepts `paneId` parameter; SwiftUI `.id()` drives
+  WS reconnect on tab switch. `TerminalTabContainer` in CenterThread
+  with "+" to spawn additional panes and × to close non-primary.
+- G13 `InAppBrowser` — `WKWebView` + URL bar + back/forward/reload +
+  Cmd-click element comment overlay that posts a CSS selector + snippet
+  back via `WKScriptMessageHandler` and injects
+  `[BROWSER COMMENT @ <selector>] <text>` into the agent's tmux pane.
+- G14 pop-out window: new `WindowGroup("session-detail", for: UUID.self)`,
+  `PoppedOutSessionView` with stay-on-top toggle via `NSWindow.level`.
+  Menu item "Pop out window" (Cmd+⌥+N) routes through a Notification
+  that `DashboardOpener` turns into `openWindow(value:)`.
+- G15 `SessionScheduler` — single re-armable DispatchSourceTimer
+  observing `registry.$sessions`; fires past-due immediately; delivers
+  via `tmuxClient.pasteBytes`. UI: `FollowUpSchedulerSheet` with
+  DatePicker + prompt field + pending list with trash.
+
+### Phase G3 — PR + sub-chats + plugins (commit `6f8d8db`)
+- G16 `PRMirror` + `PRReviewPane` — auto-detects PR URL in chat (regex
+  over assistant text + tool results), polls `gh pr view --json` every
+  30s, exposes state/title/author/diff stats/review state + Approve
+  button (`gh pr review --approve`). Manual URL entry when auto-detect
+  hasn't fired. 6th tab in the review pane.
+- G17 threaded sub-chats: `SessionsModel.spawnSubchat(parentId:)`
+  creates a child with `parentSessionId` set, sharing parent's cwd +
+  mode; sidebar nests children under parents with an arrow.turn.down.right
+  indent (iterative depth-first flatten so SwiftUI's opaque return
+  type doesn't trip on self-recursion). Cmd+; on the open session
+  forks a sub-chat; right-click context menu also offers it.
+- G18 `PluginRegistry` — read-only inventory of MCP servers + plugins
+  from `~/.codex/config.toml` (top-level `[mcp_servers.<name>]` sections)
+  and `~/.claude/settings.json` (`enabledPlugins` + `mcpServers`).
+  Surfaced in `PairingSettingsView` "Plugins" section.
+
+### Post-G3 polish
+
+- **30-day session sidebar** (commit `d9bcb02`) — `RecentSession` DTO +
+  `AgentRepo.recentSessions`; `RepoIndex` splits `liveNowWindow` (5 min,
+  green dot) from `recentActivityWindow` (30 days, per-JSONL rows).
+  Each recent row opens a synthetic AgentSession pinned to that exact
+  JSONL path via `forcedChatStoreURLs`. Repos sort by most-recent
+  activity. 50-row cap per repo.
+- **JSONL encoder fix** (commit `6c4fb61`) — `SessionChatStore.resolveSessionFileURL`
+  now applies Claude's full encoding (`/`, `_`, ` ` → `-`) and walks up
+  parent directories to find sessions filed under a parent of the git
+  repo.
+- **Tool-run disclosure** (commit `4aa6112`) — `ChatThreadScroll`
+  buckets consecutive tool_use + tool_result messages into a single
+  "Ran N commands" DisclosureGroup; each tool inside is independently
+  expandable to show command + result. `QuietDisclosure` style strips
+  the default chrome to a chevron only. Bash's `description` is the
+  headline; the command is in `expandedDetail`.
+- **Responsive layout** (commit `95c26be`) — workspace measures its own
+  width via `WorkspaceWidthKey` PreferenceKey; below 1100pt the review
+  pane is removed from the hierarchy so Sessions sidebar + chat get the
+  room. Cmd+W toggle disables itself with a "widen the window" tooltip.
+- **Smart auto-scroll** — chat thread only follows new messages when the
+  bottom anchor is visible; "Jump to latest" floating button appears
+  when scrolled away from the tail.
+
 ### Build matrix
 ```
 xcodebuild -scheme "Clawdmeter (Mac)"   build  → BUILD SUCCEEDED
 xcodebuild -scheme "Clawdmeter (iOS)"   build  → BUILD SUCCEEDED
 xcodebuild -scheme "Clawdmeter (Watch)" build  → BUILD SUCCEEDED
-swift test (ClawdmeterShared)                  → 71/71
+swift test (ClawdmeterShared)                  → 79/79
 swift test (tools/tmux-cc-probe)               → 19/19
 ```
 

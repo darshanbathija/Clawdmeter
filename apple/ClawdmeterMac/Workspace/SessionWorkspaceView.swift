@@ -950,6 +950,12 @@ private struct ChatThreadScroll: View {
     /// resetting expand state when the user scrolls.
     @State private var expanded: Set<String> = []
 
+    /// Smart auto-scroll: only follow new messages when the user is already
+    /// reading at the bottom. Otherwise we'd yank them away from history
+    /// every time the agent emitted a token. Updated by the bottom anchor's
+    /// `.onAppear` / `.onDisappear`.
+    @State private var isPinnedToBottom: Bool = true
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -963,11 +969,38 @@ private struct ChatThreadScroll: View {
                                 .padding(.horizontal, 16)
                         }
                     }
-                    Color.clear.frame(height: 12).id("bottom-anchor")
+                    // Sentinel anchor: when this view is on-screen we know
+                    // the user is at the tail of the thread, so we follow
+                    // new messages. When it disappears we stop.
+                    Color.clear
+                        .frame(height: 12)
+                        .id("bottom-anchor")
+                        .onAppear { isPinnedToBottom = true }
+                        .onDisappear { isPinnedToBottom = false }
                 }
                 .padding(.vertical, 12)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if !isPinnedToBottom, !store.messages.isEmpty {
+                    Button(action: {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
+                    }) {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.primary)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 12)
+                    .help("Jump to latest")
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                }
+            }
             .onChange(of: store.messages.count) { _, _ in
+                guard isPinnedToBottom else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo("bottom-anchor", anchor: .bottom)
                 }
