@@ -1387,6 +1387,16 @@ public final class AgentControlServer {
             sendResponse(.notFound, on: connection)
             return
         }
+        // T13: plan approval is a mid-session respawn that exits plan mode
+        // and gives the agent edit permission. Track it in the swap audit
+        // log so the Diagnostics viewer (T17) sees it alongside model/
+        // effort/mode swaps.
+        let peer = Self.endpointString(connection.endpoint)
+        await AuditLog.shared.recordSwap(
+            sessionId: uuid, sourcePeer: peer,
+            from: session.model, to: session.model ?? "(default)",
+            effort: "(plan-approve agent=\(session.agent.rawValue))"
+        )
         // Per D13: kill the plan-mode pane, spawn a fresh execution pane
         // in the same window. Overlay covers the swap UI-side.
         //
