@@ -29,6 +29,11 @@ struct DashboardView: View {
     /// flag is off (existing Usage view fills the whole window).
     @State private var selectedTab: DashboardTab = .usage
 
+    /// Drives the "Sync with iPhone" popover in the header. The popover
+    /// renders the pairing QR + Copy URL CTA — the two things users need
+    /// to pair an iPhone — without burying them in Settings → Sessions.
+    @State private var showPairingPopover: Bool = false
+
     private var theme: AppTheme {
         AppTheme(rawValue: themeRaw) ?? .system
     }
@@ -135,11 +140,42 @@ struct DashboardView: View {
                     .foregroundStyle(primaryText)
             }
 
+            syncWithiPhoneButton
+
             ThemePill(themeRaw: $themeRaw, scheme: effectiveScheme)
         }
         .padding(.horizontal, 28)
         .padding(.top, 22)
         .padding(.bottom, 18)
+    }
+
+    /// Front-and-center pairing CTA: QR + Copy URL in a popover so users
+    /// don't have to dig through Settings → Sessions to bring an iPhone
+    /// online. The Settings pane keeps the destructive controls
+    /// (regenerate / revoke); this one is the happy-path entry point.
+    @ViewBuilder
+    private var syncWithiPhoneButton: some View {
+        if let runtime = AppDelegate.runtime {
+            Button {
+                showPairingPopover.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "iphone.gen3")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Sync with iPhone")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(terraCotta)
+                .foregroundStyle(.white)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showPairingPopover, arrowEdge: .bottom) {
+                PairingQRPopoverContent(runtime: runtime)
+            }
+        }
     }
 
     // MARK: - Theme-aware colors
