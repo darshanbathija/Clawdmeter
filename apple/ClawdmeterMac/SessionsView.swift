@@ -40,7 +40,11 @@ struct NewSessionMacSheet: View {
                 Picker("Pick a repo", selection: $repoPath) {
                     Text("(custom path)").tag("")
                     ForEach(model.repos, id: \.key) { repo in
-                        let suffix = repo.liveSessionCount > 0 ? "  • live" : ""
+                        let suffix: String = {
+                            if repo.liveSessionCount > 0 { return "  • live" }
+                            if !repo.recentSessions.isEmpty { return "  • \(repo.recentSessions.count) recent" }
+                            return ""
+                        }()
                         Text("\(repo.displayName)\(suffix)").tag(repo.key)
                     }
                 }
@@ -144,11 +148,16 @@ public final class SessionsModel: ObservableObject {
     /// center pane (workspace still renders sidebar + review).
     @Published public var openSessionId: UUID?
 
-    /// When the user opens a repo's outside-Clawdmeter latest session, we
-    /// synthesize a read-only AgentSession instance. Stored here so it
-    /// survives the workspace's render cycle.
-    @Published public var openOutsideRepoKey: String?
+    /// When the user opens an outside-Clawdmeter session (any JSONL in the
+    /// recent-activity window), we synthesize a read-only AgentSession.
+    /// Keyed by the JSONL absolute path so each recent row is its own
+    /// distinct synthetic session.
+    @Published public var openOutsideJSONLPath: String?
     private var syntheticOutsideSessions: [String: AgentSession] = [:]
+    /// Per-synthetic-session URL pin. Drives `chatStore(for:)` to tail this
+    /// exact JSONL instead of falling back to `resolveSessionFileURL`'s
+    /// newest-wins logic.
+    private var forcedChatStoreURLs: [UUID: URL] = [:]
 
     /// Sidebar search query (G6). Filters repos + sessions by displayName,
     /// goal, and message body substring. Empty = no filter.
@@ -165,29 +174,36 @@ public final class SessionsModel: ObservableObject {
            let s = registry.sessions.first(where: { $0.id == id }) {
             return s
         }
-        if let key = openOutsideRepoKey,
-           let s = syntheticOutsideSessions[key] {
+        if let path = openOutsideJSONLPath,
+           let s = syntheticOutsideSessions[path] {
             return s
         }
         return nil
     }
 
-    /// True when the currently-open session is the synthetic outside-
+    /// True when the currently-open session is a synthetic outside-
     /// Clawdmeter one. The center pane disables composer + actions.
     public var openSessionIsReadOnly: Bool {
-        openOutsideRepoKey != nil && openSessionId == nil
+        openOutsideJSONLPath != nil && openSessionId == nil
     }
 
-    /// Open a read-only chat view for a repo whose live activity is from
-    /// outside Clawdmeter (Conductor / Cursor / Terminal-launched agent).
-    public func openOutsideSession(repoKey: String) {
-        let displayName = repos.first { $0.key == repoKey }?.displayName
-            ?? (repoKey as NSString).lastPathComponent
+    /// Open a specific outside-Clawdmeter JSONL as a read-only chat. Each
+    /// JSONL gets its own synthetic AgentSession, so flipping between
+    /// recent rows in the sidebar doesn't share state.
+    public func openOutsideSession(recent: RecentSession, repoKey: String, repoDisplayName: String) {
+        let url = URL(fileURLWithPath: recent.path)
+        let path = recent.path
+        if let existing = syntheticOutsideSessions[path] {
+            openOutsideJSONLPath = path
+            openSessionId = nil
+            forcedChatStoreURLs[existing.id] = url
+            return
+        }
         let synth = AgentSession(
             id: UUID(),
             repoKey: repoKey,
-            repoDisplayName: displayName,
-            agent: .claude,
+            repoDisplayName: repoDisplayName,
+            agent: recent.provider,
             model: nil,
             goal: nil,
             worktreePath: nil,
@@ -195,18 +211,19 @@ public final class SessionsModel: ObservableObject {
             tmuxPaneId: nil,
             status: .running,
             planText: nil,
-            createdAt: Date(),
-            lastEventAt: Date(),
+            createdAt: recent.lastModified,
+            lastEventAt: recent.lastModified,
             lastEventSeq: 0
         )
-        syntheticOutsideSessions[repoKey] = synth
-        openOutsideRepoKey = repoKey
+        syntheticOutsideSessions[path] = synth
+        forcedChatStoreURLs[synth.id] = url
+        openOutsideJSONLPath = path
         openSessionId = nil
     }
 
     public func closeChatView() {
         openSessionId = nil
-        openOutsideRepoKey = nil
+        openOutsideJSONLPath = nil
     }
 
     public let repoIndex: RepoIndex
@@ -233,12 +250,15 @@ public final class SessionsModel: ObservableObject {
         self.supervisor = supervisor
     }
 
-    /// Get or create the chat store for a session.
+    /// Get or create the chat store for a session. If the session is one of
+    /// our synthetic outside-Clawdmeter ones, route through the pinned URL
+    /// the caller registered via `openOutsideSession(...)`; otherwise fall
+    /// back to "newest JSONL under the repo's project dir".
     public func chatStore(for session: AgentSession) -> SessionChatStore? {
         if let existing = chatStores[session.id] { return existing }
-        guard let url = SessionChatStore.resolveSessionFileURL(repoCwd: session.repoKey) else {
-            return nil
-        }
+        let url: URL? = forcedChatStoreURLs[session.id]
+            ?? SessionChatStore.resolveSessionFileURL(repoCwd: session.repoKey)
+        guard let url else { return nil }
         let store = SessionChatStore(sessionId: session.id, sessionFileURL: url)
         store.start()
         chatStores[session.id] = store
@@ -348,7 +368,7 @@ public final class SessionsModel: ObservableObject {
     public func openVisibleSession(at index: Int) {
         guard index >= 1, index <= visibleSessions.count else { return }
         let session = visibleSessions[index - 1]
-        openOutsideRepoKey = nil
+        openOutsideJSONLPath = nil
         openSessionId = session.id
     }
 
@@ -358,7 +378,9 @@ public final class SessionsModel: ObservableObject {
         let snapshot = await repoIndex.refresh()
         self.repos = snapshot
         for repo in snapshot {
-            if !sessions(for: repo.key).isEmpty || repo.liveSessionCount > 0 {
+            if !sessions(for: repo.key).isEmpty
+                || repo.liveSessionCount > 0
+                || !repo.recentSessions.isEmpty {
                 expandedRepoKeys.insert(repo.key)
             }
         }

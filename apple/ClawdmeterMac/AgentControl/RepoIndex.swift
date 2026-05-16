@@ -78,21 +78,36 @@ public actor RepoIndex {
 
     // MARK: - Snapshot build
 
-    /// JSONL files modified within this window count as "live" — an agent
-    /// is actively writing to them right now (regardless of whether
-    /// Clawdmeter spawned the process). 5 minutes catches typical agent
-    /// pause-between-turns without flickering off.
-    public static let liveActivityWindow: TimeInterval = 5 * 60
+    /// Narrow "writing right now" window. JSONLs touched within this window
+    /// drive the green "live" dot in the sidebar. 5 minutes catches typical
+    /// agent pause-between-turns without flickering off.
+    public static let liveNowWindow: TimeInterval = 5 * 60
+
+    /// Wide recent-activity window. JSONLs touched within this window are
+    /// surfaced as individual outside-Clawdmeter rows in the sidebar so the
+    /// user can revisit past sessions as read-only chat. 30 days mirrors the
+    /// existing analytics "Past 30d" window.
+    public static let recentActivityWindow: TimeInterval = 30 * 24 * 60 * 60
+
+    /// Legacy alias (still used in tests / callers). Equal to `liveNowWindow`.
+    public static var liveActivityWindow: TimeInterval { liveNowWindow }
+
+    /// Hard cap on recent-session rows surfaced per repo, so a repo with
+    /// hundreds of past JSONLs doesn't bloat the sidebar.
+    private static let maxRecentSessionsPerRepo: Int = 50
 
     private nonisolated func buildSnapshot() async -> [AgentRepo] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var keysSeen = Set<String>()
         var displayNames: [String: String] = [:]
         /// Per repo: how many JSONL files have been touched in the last
-        /// `liveActivityWindow`. Non-zero = at least one agent actively
-        /// writing.
+        /// `liveNowWindow`. Non-zero = at least one agent actively writing.
         var liveCounts: [String: Int] = [:]
-        let liveCutoff = Date().addingTimeInterval(-Self.liveActivityWindow)
+        /// Per repo: every JSONL within `recentActivityWindow` with its
+        /// path + mtime + provider. Newest first after sorting below.
+        var recentByRepo: [String: [RecentSession]] = [:]
+        let liveCutoff = Date().addingTimeInterval(-Self.liveNowWindow)
+        let recentCutoff = Date().addingTimeInterval(-Self.recentActivityWindow)
 
         // Source 1: ~/.claude/projects/ directory names (encoded cwds)
         let claudeProjects = home.appendingPathComponent(".claude/projects")
@@ -106,16 +121,25 @@ public actor RepoIndex {
                         keysSeen.insert(key)
                         displayNames[key] = RepoIdentity.displayName(for: key)
                     }
-                    // Count "live" JSONLs under this project dir.
                     if let jsonls = try? FileManager.default.contentsOfDirectory(
                         at: entry,
                         includingPropertiesForKeys: [.contentModificationDateKey]
                     ) {
                         for jsonl in jsonls where jsonl.pathExtension == "jsonl" {
-                            if let mtime = try? jsonl.resourceValues(
+                            guard let mtime = try? jsonl.resourceValues(
                                 forKeys: [.contentModificationDateKey]
-                            ).contentModificationDate, mtime > liveCutoff {
+                            ).contentModificationDate else { continue }
+                            if mtime > liveCutoff {
                                 liveCounts[key, default: 0] += 1
+                            }
+                            if mtime > recentCutoff {
+                                recentByRepo[key, default: []].append(
+                                    RecentSession(
+                                        path: jsonl.path,
+                                        lastModified: mtime,
+                                        provider: .claude
+                                    )
+                                )
                             }
                         }
                     }
@@ -123,15 +147,25 @@ public actor RepoIndex {
             }
         }
 
-        // Source 2: ~/.codex/sessions/**/*.jsonl
+        // Source 2: ~/.codex/sessions/**/*.jsonl — collect cwd + mtime + path
         let codexSessions = home.appendingPathComponent(".codex/sessions")
-        let codexCwds = await readCwdsFromCodexSessions(at: codexSessions)
-        for cwd in codexCwds {
-            let key = RepoIdentity.normalize(cwd)
+        let codexJSONLs = await readCodexSessionMeta(at: codexSessions, recentCutoff: recentCutoff)
+        for meta in codexJSONLs {
+            let key = RepoIdentity.normalize(meta.cwd)
             if !keysSeen.contains(key) {
                 keysSeen.insert(key)
                 displayNames[key] = RepoIdentity.displayName(for: key)
             }
+            if meta.mtime > liveCutoff {
+                liveCounts[key, default: 0] += 1
+            }
+            recentByRepo[key, default: []].append(
+                RecentSession(
+                    path: meta.path,
+                    lastModified: meta.mtime,
+                    provider: .codex
+                )
+            )
         }
 
         // Source 3: configured scan roots (default empty)
@@ -147,25 +181,44 @@ public actor RepoIndex {
             }
         }
 
-        // Sort alphabetically by display name, with "Other" last.
+        // Sort by most-recent activity (newest first) so the user's hot repos
+        // float to the top of the sidebar. Repos with no recent activity fall
+        // back to alphabetical. "Other" always last.
+        let mostRecentByRepo: [String: Date] = recentByRepo.mapValues { entries in
+            entries.map(\.lastModified).max() ?? .distantPast
+        }
         let sortedKeys = keysSeen.sorted { a, b in
-            let da = displayNames[a] ?? a
-            let db = displayNames[b] ?? b
             if a == RepoKey.other { return false }
             if b == RepoKey.other { return true }
+            let mra = mostRecentByRepo[a]
+            let mrb = mostRecentByRepo[b]
+            if let mra, let mrb {
+                if mra != mrb { return mra > mrb }
+            } else if mra != nil {
+                return true
+            } else if mrb != nil {
+                return false
+            }
+            let da = displayNames[a] ?? a
+            let db = displayNames[b] ?? b
             return da.localizedCaseInsensitiveCompare(db) == .orderedAscending
         }
 
-        let repos = sortedKeys.map { key in
-            AgentRepo(
+        let repos = sortedKeys.map { key -> AgentRepo in
+            let recent = (recentByRepo[key] ?? [])
+                .sorted { $0.lastModified > $1.lastModified }
+                .prefix(Self.maxRecentSessionsPerRepo)
+            return AgentRepo(
                 key: key,
                 displayName: displayNames[key] ?? key,
-                hasActiveSessions: false,  // Phase 2 fills this in from registry
-                liveSessionCount: liveCounts[key, default: 0]
+                hasActiveSessions: false,  // filled in from registry
+                liveSessionCount: liveCounts[key, default: 0],
+                recentSessions: Array(recent)
             )
         }
         let liveTotal = liveCounts.values.reduce(0, +)
-        repoIndexLogger.info("Snapshot built: \(repos.count) repos, \(liveTotal) live sessions across all repos")
+        let recentTotal = recentByRepo.values.reduce(0) { $0 + $1.count }
+        repoIndexLogger.info("Snapshot built: \(repos.count) repos, \(liveTotal) live, \(recentTotal) recent (30d)")
         return repos
     }
 
@@ -242,25 +295,42 @@ public actor RepoIndex {
     }
 
     /// Walk a tmux/codex sessions directory recursively for `*.jsonl` and
-    /// extract the cwd from the first line of each.
-    private nonisolated func readCwdsFromCodexSessions(at root: URL) async -> [String] {
-        var found: Set<String> = []
+    /// extract the cwd from the first line of each. Returns one row per
+    /// JSONL with its mtime + path so the caller can both register the cwd
+    /// and surface each JSONL as a recent-session row.
+    struct CodexSessionMeta: Sendable {
+        let cwd: String
+        let path: String
+        let mtime: Date
+    }
+    private nonisolated func readCodexSessionMeta(
+        at root: URL,
+        recentCutoff: Date
+    ) async -> [CodexSessionMeta] {
+        var out: [CodexSessionMeta] = []
         guard let enumerator = FileManager.default.enumerator(
             at: root,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
-        // Bound the walk so a corrupted ~/.codex/ doesn't hang us.
         var inspected = 0
         for case let entry as URL in enumerator {
             inspected += 1
             if inspected > 5000 { break }
             guard entry.pathExtension == "jsonl" else { continue }
+            guard let mtime = try? entry.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate else { continue }
+            // Cheap pre-filter: skip JSONLs older than the recent-activity
+            // window unless we still need their cwd for repo discovery. We
+            // always need the cwd, but very old ones don't need parsing past
+            // the first hit, so just read on a wider net.
+            guard mtime > recentCutoff else { continue }
             if let cwd = readFirstCwd(from: entry) {
-                found.insert(cwd)
+                out.append(CodexSessionMeta(cwd: cwd, path: entry.path, mtime: mtime))
             }
         }
-        return Array(found)
+        return out
     }
 
     /// Scan the first ~64KB of a JSONL file looking for the first line with

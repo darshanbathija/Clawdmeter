@@ -306,19 +306,33 @@ private struct SidebarPane: View {
         let visibleSessions = model.filter(sessions: allSessions)
         let rootSessions = visibleSessions.filter { $0.parentSessionId == nil }
         let isExpanded = model.expandedRepoKeys.contains(repo.key)
+        let recentSessions = repo.recentSessions
         return VStack(alignment: .leading, spacing: 0) {
-            repoHeader(repo, isExpanded: isExpanded, sessionCount: visibleSessions.count)
+            repoHeader(repo, isExpanded: isExpanded, sessionCount: visibleSessions.count + recentSessions.count)
             if isExpanded {
                 ForEach(rootSessions) { root in
                     sessionTree(root: root, depth: 0)
                 }
-                if repo.liveSessionCount > 0 {
-                    Button(action: { model.openOutsideSession(repoKey: repo.key) }) {
-                        outsideSessionRow(repo)
+                if !recentSessions.isEmpty {
+                    Text("Recent (last 30 days)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 24)
+                        .padding(.top, 4)
+                    ForEach(recentSessions) { recent in
+                        Button(action: {
+                            model.openOutsideSession(
+                                recent: recent,
+                                repoKey: repo.key,
+                                repoDisplayName: repo.displayName
+                            )
+                        }) {
+                            recentSessionRow(recent, isOpen: model.openOutsideJSONLPath == recent.path)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-                if visibleSessions.isEmpty && repo.liveSessionCount == 0 {
+                if visibleSessions.isEmpty && recentSessions.isEmpty {
                     Button(action: {
                         model.selectedRepoKey = repo.key
                         model.showingNewSessionSheet = true
@@ -340,6 +354,65 @@ private struct SidebarPane: View {
             }
         }
     }
+
+    /// One row per JSONL surfaced from `repo.recentSessions` — these were
+    /// not spawned by Clawdmeter (Conductor / Cursor / Terminal). Click
+    /// opens them as read-only chat.
+    private func recentSessionRow(_ recent: RecentSession, isOpen: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(isRecentLive(recent) ? Color.green : Color.secondary.opacity(0.5))
+                .frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(recentTitle(recent))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(recentSubtitle(recent))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "eye")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.leading, 30)
+        .padding(.trailing, 24)
+        .padding(.vertical, 5)
+        .background(isOpen ? terraCotta.opacity(0.15) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5))
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .help("Read-only — opens the JSONL at \(recent.path)")
+    }
+
+    private func isRecentLive(_ recent: RecentSession) -> Bool {
+        Date().timeIntervalSince(recent.lastModified) < 5 * 60
+    }
+
+    private func recentTitle(_ recent: RecentSession) -> String {
+        let provider = recent.provider == .claude ? "Claude" : "Codex"
+        if isRecentLive(recent) {
+            return "\(provider) · live now"
+        }
+        return "\(provider) session"
+    }
+
+    private func recentSubtitle(_ recent: RecentSession) -> String {
+        let rel = Self.relativeTimestampFormatter.localizedString(
+            for: recent.lastModified, relativeTo: Date()
+        )
+        return "\(rel) · read-only"
+    }
+
+    private static let relativeTimestampFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
 
     /// G17: render a session row + its children indented underneath.
     /// Iterative (not recursive) so SwiftUI's opaque return type doesn't
@@ -422,7 +495,7 @@ private struct SidebarPane: View {
     private func sessionRow(_ session: AgentSession, isOpen: Bool, depth: Int = 0) -> some View {
         Button(action: {
             model.openSessionId = session.id
-            model.openOutsideRepoKey = nil
+            model.openOutsideJSONLPath = nil
         }) {
             HStack(spacing: 8) {
                 if depth > 0 {
@@ -469,27 +542,6 @@ private struct SidebarPane: View {
         }
         .buttonStyle(.plain)
         .opacity(session.archivedAt != nil ? 0.6 : 1.0)
-    }
-
-    private func outsideSessionRow(_ repo: AgentRepo) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(.green).frame(width: 6, height: 6)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Latest outside")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
-                Text("read-only · \(repo.liveSessionCount) JSONL")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "eye")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
     }
 
     private func sessionTitle(_ session: AgentSession) -> String {

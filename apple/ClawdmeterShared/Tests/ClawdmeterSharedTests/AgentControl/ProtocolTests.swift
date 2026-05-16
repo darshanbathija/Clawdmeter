@@ -17,6 +17,46 @@ final class AgentControlProtocolTests: XCTestCase {
         XCTAssertEqual(repo, decoded)
     }
 
+    func testAgentRepoRecentSessionsRoundTrip() throws {
+        let recent = [
+            RecentSession(
+                path: "/Users/d/.claude/projects/foo/abc.jsonl",
+                lastModified: Date(timeIntervalSince1970: 1747000000),
+                provider: .claude
+            ),
+            RecentSession(
+                path: "/Users/d/.codex/sessions/2026/05/16/def.jsonl",
+                lastModified: Date(timeIntervalSince1970: 1747100000),
+                provider: .codex
+            ),
+        ]
+        let repo = AgentRepo(
+            key: "/x", displayName: "x", hasActiveSessions: false,
+            liveSessionCount: 1, recentSessions: recent
+        )
+        let data = try JSONEncoder().encode(repo)
+        let decoded = try JSONDecoder().decode(AgentRepo.self, from: data)
+        XCTAssertEqual(decoded.recentSessions.count, 2)
+        XCTAssertEqual(decoded.recentSessions[0].provider, .claude)
+        XCTAssertEqual(decoded.recentSessions[1].provider, .codex)
+        XCTAssertEqual(decoded, repo)
+    }
+
+    /// Pre-recent-sessions AgentRepo JSON has no `recentSessions` key.
+    /// Decoder must default to empty array.
+    func testAgentRepoBackwardCompatNoRecent() throws {
+        let legacyJSON = """
+        {
+            "key": "/x",
+            "displayName": "x",
+            "hasActiveSessions": false,
+            "liveSessionCount": 0
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AgentRepo.self, from: legacyJSON)
+        XCTAssertEqual(decoded.recentSessions, [])
+    }
+
     func testAgentSessionRoundTrip() throws {
         let session = AgentSession(
             id: UUID(),

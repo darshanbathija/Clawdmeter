@@ -13,6 +13,26 @@ import Foundation
 
 // MARK: - Repo + Session
 
+/// One session JSONL file that wasn't spawned by Clawdmeter but lived in a
+/// repo we know about. Surfaced in the sidebar so the user can revisit any
+/// past Claude / Codex session as read-only chat.
+public struct RecentSession: Codable, Hashable, Sendable, Identifiable {
+    /// Absolute path to the JSONL on disk. Doubles as our stable id —
+    /// JSONL files don't move once written.
+    public let path: String
+    /// Most recent mtime we observed (for sorting + "X ago" label).
+    public let lastModified: Date
+    /// Which provider wrote this JSONL.
+    public let provider: AgentKind
+    public var id: String { path }
+
+    public init(path: String, lastModified: Date, provider: AgentKind) {
+        self.path = path
+        self.lastModified = lastModified
+        self.provider = provider
+    }
+}
+
 /// Stable identifier for a repo, mirrors `RepoKey` from the existing
 /// Analytics layer. Use `RepoIdentity.normalize(_:)` to convert raw cwds.
 public struct AgentRepo: Codable, Hashable, Sendable {
@@ -24,22 +44,27 @@ public struct AgentRepo: Codable, Hashable, Sendable {
     /// (one Clawdmeter spawned). Distinct from `liveSessionCount`.
     public let hasActiveSessions: Bool
     /// Count of session JSONLs under this repo with mtime within the last
-    /// 5 minutes — i.e. agents that are actively writing to disk RIGHT NOW,
-    /// regardless of whether Clawdmeter spawned them. Lets the UI surface
-    /// Conductor / Cursor / system-Terminal sessions that the user
-    /// started independently. Optional (default 0) so old wire stays valid.
+    /// 5 minutes — agents actively writing RIGHT NOW. This is the narrow
+    /// "live now" signal (green dot in UI). Optional (default 0) so old
+    /// wire stays valid.
     public let liveSessionCount: Int
+    /// Sessions (outside-Clawdmeter) that wrote to disk within the recent
+    /// activity window (30 days by default). Each entry is one JSONL the
+    /// user can open as read-only chat. Sorted newest-first.
+    public let recentSessions: [RecentSession]
 
     public init(
         key: String,
         displayName: String,
         hasActiveSessions: Bool,
-        liveSessionCount: Int = 0
+        liveSessionCount: Int = 0,
+        recentSessions: [RecentSession] = []
     ) {
         self.key = key
         self.displayName = displayName
         self.hasActiveSessions = hasActiveSessions
         self.liveSessionCount = liveSessionCount
+        self.recentSessions = recentSessions
     }
 
     public init(from decoder: Decoder) throws {
@@ -48,10 +73,11 @@ public struct AgentRepo: Codable, Hashable, Sendable {
         self.displayName = try c.decode(String.self, forKey: .displayName)
         self.hasActiveSessions = try c.decode(Bool.self, forKey: .hasActiveSessions)
         self.liveSessionCount = (try? c.decode(Int.self, forKey: .liveSessionCount)) ?? 0
+        self.recentSessions = (try? c.decodeIfPresent([RecentSession].self, forKey: .recentSessions)) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case key, displayName, hasActiveSessions, liveSessionCount
+        case key, displayName, hasActiveSessions, liveSessionCount, recentSessions
     }
 }
 
