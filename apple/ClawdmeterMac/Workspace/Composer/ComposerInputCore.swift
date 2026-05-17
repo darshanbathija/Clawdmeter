@@ -35,9 +35,22 @@ struct ComposerInputCore: View {
     var sessionIsRunning: Bool = false
 
     @StateObject private var dictation = SpeechDictation()
+    @ObservedObject private var skillCatalog = SkillCatalog.shared
     @State private var composerTextBeforeDictation: String = ""
     @State private var isShowingFileImporter: Bool = false
     @State private var dropTargetActive: Bool = false
+    @State private var showingPalette: Bool = false
+    @State private var paletteQuery: String = ""
+    @State private var showingMentions: Bool = false
+    @State private var mentionQuery: String = ""
+    /// Optional: when set, MentionPicker uses these as the source of
+    /// suggestions (parent passes session-derived sources + open sessions).
+    var mentionSourceProvider: () -> (sessions: [AgentSession], sourceEntries: [SourceEntry], recents: [RecentSession]) = { ([], [], []) }
+    /// Optional: running-session cost ticker text (e.g. "~$0.12 \u{2022} 2.3K tokens").
+    /// When nil the cost row is hidden.
+    var costSummary: String?
+    /// Project-local skill root, if any (`<repo>/.claude/skills/`).
+    var projectSkillsRoot: URL?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -47,6 +60,46 @@ struct ComposerInputCore: View {
                 attachmentChipsRow
             }
             inputRow
+                .overlay(alignment: .topLeading) {
+                    if showingPalette {
+                        CommandPaletteView(
+                            catalog: skillCatalog,
+                            agent: store.agent,
+                            query: $paletteQuery,
+                            onSelect: applyPaletteSelection,
+                            onDismiss: { showingPalette = false }
+                        )
+                        .offset(y: -290)
+                        .transition(.opacity)
+                        .zIndex(2)
+                    }
+                    if showingMentions {
+                        let triple = mentionSourceProvider()
+                        MentionPicker(
+                            openSessions: triple.sessions,
+                            sourceEntries: triple.sourceEntries,
+                            recentJSONLs: triple.recents,
+                            query: $mentionQuery,
+                            onSelect: applyMentionSelection,
+                            onDismiss: { showingMentions = false }
+                        )
+                        .offset(y: -290)
+                        .transition(.opacity)
+                        .zIndex(2)
+                    }
+                }
+            if let summary = costSummary {
+                HStack(spacing: 4) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text(summary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+            }
             if let err = store.lastError {
                 Text(err.localizedDescription)
                     .font(.system(size: 11))
@@ -75,6 +128,70 @@ struct ComposerInputCore: View {
         ) { result in
             handleFileImport(result)
         }
+        .onChange(of: store.text) { _, new in
+            updatePaletteTriggers(text: new)
+        }
+        .onAppear {
+            skillCatalog.projectSkillsRoot = projectSkillsRoot
+            skillCatalog.refreshIfStale()
+        }
+    }
+
+    // MARK: - Palette/mention trigger detection
+
+    private func updatePaletteTriggers(text: String) {
+        // Slash command palette: line starts with '/'.
+        if let lastLine = text.split(separator: "\n", omittingEmptySubsequences: false).last,
+           lastLine.hasPrefix("/") {
+            let query = String(lastLine.dropFirst())
+            paletteQuery = query
+            showingPalette = true
+            showingMentions = false
+            return
+        }
+        // @-mention: detect the trailing @<word> in the text.
+        if let atRange = text.range(of: "@", options: .backwards) {
+            let afterAt = String(text[atRange.upperBound...])
+            if !afterAt.contains(" "), !afterAt.contains("\n") {
+                mentionQuery = afterAt
+                showingMentions = true
+                showingPalette = false
+                return
+            }
+        }
+        showingPalette = false
+        showingMentions = false
+    }
+
+    private func applyPaletteSelection(_ cmd: PaletteCommand) {
+        // Replace the current last line ("/foo") with "/<cmd.id>" + newline.
+        var lines = store.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if !lines.isEmpty {
+            lines.removeLast()
+        }
+        lines.append("/\(cmd.id)")
+        store.text = lines.joined(separator: "\n")
+        showingPalette = false
+        onSend()
+    }
+
+    private func applyMentionSelection(_ pick: MentionPicker.Suggestion) {
+        // Replace the trailing "@<query>" with "@<resolved>".
+        guard let atRange = store.text.range(of: "@", options: .backwards) else {
+            showingMentions = false
+            return
+        }
+        let replacement: String
+        switch pick {
+        case .session(let s):
+            replacement = "@session:\(s.id.uuidString) "
+        case .file(let path, _):
+            replacement = "@\(path) "
+        case .recent(let r):
+            replacement = "@\(r.path) "
+        }
+        store.text.replaceSubrange(atRange.lowerBound..<store.text.endIndex, with: replacement)
+        showingMentions = false
     }
 
     // MARK: - Chip row (mode-dependent)

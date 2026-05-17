@@ -1137,4 +1137,16 @@ public struct ComposeDraft: Codable, Sendable, Equatable, Hashable {
         self.suggestedEffort = suggestedEffort
         self.createdAt = createdAt
     }
+
+    /// Serialize for inclusion as a nested JSON object inside the WS
+    /// envelope's `draft` field. Returns `[:]` on encode failure (which
+    /// shouldn't happen for an all-primitives struct).
+    public func encodedJSONObject() -> [String: Any] {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(self),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return obj
+    }
 }

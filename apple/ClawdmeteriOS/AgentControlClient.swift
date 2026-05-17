@@ -595,6 +595,33 @@ public final class AgentControlClient: ObservableObject {
         }
     }
 
+    /// X1 cross-Apple handoff: post a compose draft to the paired Mac via
+    /// a short-lived WebSocket connection using op `compose-draft`. The
+    /// Mac's empty-state composer listens for these via NotificationCenter
+    /// and pre-fills its text + chip suggestions. The connection closes
+    /// immediately after the daemon acknowledges the send.
+    @MainActor
+    public func postComposeDraft(_ draft: ComposeDraft) async {
+        guard let host, let token else { return }
+        guard let url = URL(string: "ws://\(Self.urlHostLiteral(host)):\(wsPort)/") else { return }
+        let task = URLSession.shared.webSocketTask(with: URLRequest(url: url, timeoutInterval: 8))
+        task.resume()
+        defer { task.cancel(with: .goingAway, reason: nil) }
+        let envelope: [String: Any] = [
+            "op": "compose-draft",
+            "token": token,
+            "draft": draft.encodedJSONObject()
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: envelope) else { return }
+        do {
+            try await task.send(.data(data))
+            // Brief delay to let the daemon flush before we cancel.
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        } catch {
+            clientLogger.warning("compose-draft post failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Fetch the parsed chat transcript for a JSONL at `path`. Used by
     /// the iOS session detail screens so they can render the actual
     /// conversation instead of a useless "Read-only · JSONL path · Last

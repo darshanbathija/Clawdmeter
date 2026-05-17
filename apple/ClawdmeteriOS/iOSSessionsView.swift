@@ -948,19 +948,29 @@ private struct NewSessionSheet: View {
                     Button("Cancel") { isPresented = false }
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    Button(action: startSession) {
-                        if isStarting {
-                            ProgressView()
-                        } else {
-                            Label("Start", systemImage: "play.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Button(action: openOnMac) {
+                            Label("Open on Mac", systemImage: "desktopcomputer")
+                                .font(.subheadline)
                         }
+                        .buttonStyle(.bordered)
+                        .disabled(goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !client.isConfigured)
+                        .help("Send the prompt to the paired Mac's empty-state composer instead of starting a session here.")
+                        .accessibilityLabel("Send draft to Mac")
+                        Button(action: startSession) {
+                            if isStarting {
+                                ProgressView()
+                            } else {
+                                Label("Start", systemImage: "play.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(SessionsV2Theme.accent)
+                        .disabled(repoKey.isEmpty || isStarting)
+                        .accessibilityLabel("Start new session")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(SessionsV2Theme.accent)
-                    .disabled(repoKey.isEmpty || isStarting)
-                    .accessibilityLabel("Start new session")
                 }
             }
             .task {
@@ -1059,6 +1069,24 @@ private struct NewSessionSheet: View {
                 isStarting = false
                 isPresented = false
             }
+        }
+    }
+
+    /// X1 cross-Apple handoff: post the current composer state as a
+    /// `compose-draft` WS envelope to the paired Mac. The Mac's empty-state
+    /// composer pre-fills with this text + chip suggestions. No session is
+    /// spawned here — the user finishes on the Mac.
+    private func openOnMac() {
+        let draft = ComposeDraft(
+            text: goal.trimmingCharacters(in: .whitespacesAndNewlines),
+            repoKey: repoKey.isEmpty ? nil : repoKey,
+            suggestedAgent: agent,
+            suggestedModel: modelId,
+            suggestedEffort: currentModelSupportsEffort ? effort : nil
+        )
+        Task {
+            await client.postComposeDraft(draft)
+            await MainActor.run { isPresented = false }
         }
     }
 }

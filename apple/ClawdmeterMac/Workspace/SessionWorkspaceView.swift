@@ -939,7 +939,16 @@ private struct CenterThread: View {
             onToggleAutopilot: { showingAutopilotConfirm = true },
             onApprovePlan: { Task { await model.approvePlan(id: session.id) } },
             showApprovePlan: session.planText != nil,
-            sessionIsRunning: session.status == .running && composerStore.isSending == false && session.status != .planning
+            sessionIsRunning: session.status == .running && composerStore.isSending == false && session.status != .planning,
+            mentionSourceProvider: {
+                let openSessions = model.registry.sessions.filter { $0.id != session.id && $0.archivedAt == nil }
+                let store = model.chatStore(for: session)
+                let sourceEntries = store?.snapshot.sourceEntries ?? []
+                let recents = model.repos.flatMap { $0.recentSessions }
+                return (openSessions, sourceEntries, Array(recents.prefix(30)))
+            },
+            costSummary: costSummaryText,
+            projectSkillsRoot: URL(fileURLWithPath: session.repoKey).appendingPathComponent(".claude/skills", isDirectory: true)
         )
         .onChange(of: composerStore.modelId) { _, new in
             guard let new, new != session.model else { return }
@@ -1020,6 +1029,36 @@ private struct CenterThread: View {
         else { return }
         let sender = MacComposerSender(port: Int(port), token: PairingTokenStore.shared.currentToken())
         try? await sender.interrupt(sessionId: session.id)
+    }
+
+    /// Running-session cost ticker shown under the composer. Uses
+    /// `SessionChatStore.snapshot.totalTokens` + Pricing.shared (the data
+    /// already powers SessionActivityStrip) plus the live weekly cap from
+    /// the AppModel. Returns nil if we have no model hint yet (chat hasn't
+    /// surfaced an assistant turn) — caller hides the row.
+    private var costSummaryText: String? {
+        guard let store = model.chatStore(for: session) else { return nil }
+        let snap = store.snapshot
+        let modelId = snap.modelHint ?? session.model ?? ""
+        let totals = TokenTotals(
+            inputTokens: snap.totalInputTokens,
+            outputTokens: snap.totalOutputTokens,
+            cacheCreationTokens: snap.totalCacheCreationTokens,
+            cacheReadTokens: snap.totalCacheReadTokens
+        )
+        let dollar = Pricing.shared.cost(for: modelId, tokens: totals)
+        let kTokens = snap.totalTokens / 1_000
+        let costStr: String = {
+            let nf = NumberFormatter()
+            nf.numberStyle = .currency
+            nf.currencyCode = "USD"
+            nf.minimumFractionDigits = (dollar as NSDecimalNumber).doubleValue < 1 ? 4 : 2
+            nf.maximumFractionDigits = (dollar as NSDecimalNumber).doubleValue < 1 ? 4 : 2
+            return nf.string(from: dollar as NSDecimalNumber) ?? "$\(dollar)"
+        }()
+        let weekly = AppDelegate.runtime?.claudeModel.usage?.weeklyPct ?? 0
+        let weeklySuffix = weekly >= 95 ? "  ⚠︎ weekly cap \(weekly)%" : ""
+        return "\(costStr) • \(kTokens)K tokens\(weeklySuffix)"
     }
 
     private func toggleAutopilot(enable: Bool) async {
