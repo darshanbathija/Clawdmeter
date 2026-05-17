@@ -115,6 +115,7 @@
 		E4CD6841EFEBD563297221FF /* SourcesPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C446A0B7936EDEA144F30E /* SourcesPane.swift */; };
 		E550450049825A95D9DB7D0E /* SessionScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D321C61E9596892F1EB13C97 /* SessionScheduler.swift */; };
 		E835774AF3CCE85077A32357 /* PlanTrackerPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFEA1EAB3B6FFE95E352655 /* PlanTrackerPane.swift */; };
+		EB6B0F15814A65989784DA73 /* TailscaleHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 882E7B0B1D24591A17536772 /* TailscaleHost.swift */; };
 		EC15D5F8B7BC3F151C890C8C /* RepoIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA356EF8A22C268A0070F750 /* RepoIndex.swift */; };
 		ECB0775FEF1BF8D1B9D4B339 /* MarkdownRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDE036C3B197F45A234547AD /* MarkdownRenderer.swift */; };
 		F2246425775CDC80F361A49E /* APNSCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21239F87404DC4B4E7F21AB7 /* APNSCredentialStore.swift */; };
@@ -243,6 +244,7 @@
 		7F3AB01400D1F534506FEF4B /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
 		82D867718395AF24B03981F5 /* iOSEffortDial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSEffortDial.swift; sourceTree = "<group>"; };
 		840350A245B7AFF9FC1014B3 /* TmuxControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TmuxControlClient.swift; sourceTree = "<group>"; };
+		882E7B0B1D24591A17536772 /* TailscaleHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscaleHost.swift; sourceTree = "<group>"; };
 		8B6A356416D72BB7ECCD6548 /* ClawdmeterWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdmeterWatchApp.swift; sourceTree = "<group>"; };
 		8C1B8A7FA6946383349924D1 /* AgentSessionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionRegistry.swift; sourceTree = "<group>"; };
 		8CB1DCED1C1E9B286E0D594F /* SessionEventWiring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEventWiring.swift; sourceTree = "<group>"; };
@@ -390,6 +392,7 @@
 				D321C61E9596892F1EB13C97 /* SessionScheduler.swift */,
 				D48BE3092D019C68CDF1B6D9 /* ShellRunner.swift */,
 				69F2E3291A6E0BEC1EE5ABEC /* SpeechDictation.swift */,
+				882E7B0B1D24591A17536772 /* TailscaleHost.swift */,
 				F0C46A8561985C07E6E31A13 /* TailscaleWhois.swift */,
 				131AD66B762768C8E5DD2D57 /* TerminalWebSocketChannel.swift */,
 				840350A245B7AFF9FC1014B3 /* TmuxControlClient.swift */,
@@ -889,6 +892,7 @@
 				5902D9B4BE8E0E4A9929A13E /* ShellRunner.swift in Sources */,
 				E4CD6841EFEBD563297221FF /* SourcesPane.swift in Sources */,
 				0524A1F795D299795862AA1B /* SpeechDictation.swift in Sources */,
+				EB6B0F15814A65989784DA73 /* TailscaleHost.swift in Sources */,
 				B49079C1A819C08F8AD06F3B /* TailscaleWhois.swift in Sources */,
 				29AF2BC82FD6FA5660BA400E /* TerminalWebSocketChannel.swift in Sources */,
 				5384D9EEF60C3B3DC9796E4D /* TmuxControlClient.swift in Sources */,

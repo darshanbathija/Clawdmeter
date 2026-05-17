@@ -471,7 +471,7 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         self.lastEventSeq = try c.decode(UInt64.self, forKey: .lastEventSeq)
         // mode: if absent, infer from worktreePath (back-compat with v1).
         if let decoded = try? c.decodeIfPresent(SessionMode.self, forKey: .mode) {
-            self.mode = decoded ?? (self.worktreePath != nil ? .worktree : .local)
+            self.mode = decoded
         } else {
             self.mode = self.worktreePath != nil ? .worktree : .local
         }

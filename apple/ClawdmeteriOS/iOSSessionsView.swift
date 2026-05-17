@@ -101,13 +101,29 @@ struct iOSSessionsView: View {
             ContentUnavailableView {
                 Label("Mac unreachable", systemImage: "wifi.exclamationmark")
             } description: {
-                Text("Couldn't reach the paired Mac. Open the Clawdmeter Mac app and confirm you're on the same Tailnet.")
-            } actions: {
-                Button("Retry") {
-                    Task { await client.refreshAll() }
+                VStack(spacing: 6) {
+                    Text("Couldn't reach the paired Mac at \(client.host ?? "—"). Open the Clawdmeter Mac app and confirm you're on the same Tailnet.")
+                    if let host = client.host, host == "127.0.0.1" {
+                        Text("Stored host is `127.0.0.1` — re-pair from the Mac so the iPhone gets a routable Tailscale address.")
+                            .font(.caption)
+                            .foregroundStyle(SessionsV2Theme.accent)
+                    } else if let err = client.lastError, !err.isEmpty {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(SessionsV2Theme.accent)
+            } actions: {
+                VStack(spacing: 8) {
+                    Button("Retry") {
+                        Task { await client.refreshAll() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(SessionsV2Theme.accent)
+                    Button("Re-pair…") { showingPairing = true }
+                        .buttonStyle(.bordered)
+                }
             }
         } else {
             ContentUnavailableView {

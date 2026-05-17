@@ -756,7 +756,7 @@ public final class AgentControlServer {
     }
 
     private func handleChangeMode(sessionId: String, request: HTTPRequest, connection: NWConnection) async {
-        guard let uuid = UUID(uuidString: sessionId), let session = registry.session(id: uuid) else {
+        guard let uuid = UUID(uuidString: sessionId), registry.session(id: uuid) != nil else {
             sendResponse(.notFound, on: connection); return
         }
         guard let req = try? JSONDecoder().decode(ChangeModeRequest.self, from: request.body) else {

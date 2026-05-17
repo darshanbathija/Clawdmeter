@@ -69,7 +69,7 @@ public final class AgentControlClient: ObservableObject {
 
     private func makeRequest(path: String, method: String = "GET", body: Data? = nil) -> URLRequest? {
         guard let host, let token else { return nil }
-        guard let url = URL(string: "http://\(host):\(httpPort)\(path)") else { return nil }
+        guard let url = URL(string: "http://\(Self.urlHostLiteral(host)):\(httpPort)\(path)") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -79,6 +79,17 @@ public final class AgentControlClient: ObservableObject {
         }
         req.timeoutInterval = 8
         return req
+    }
+
+    /// Wrap raw IPv6 literals in brackets so `URL(string:)` parses the
+    /// authority correctly. RFC 3986 requires `[fd7a:...]:port` form, but
+    /// the Tailscale `tailscale ip -6` output and the pairing URL's
+    /// `url.host` field are both unbracketed. Hostnames and IPv4 are
+    /// returned untouched.
+    static func urlHostLiteral(_ host: String) -> String {
+        if host.hasPrefix("[") { return host }
+        if host.contains(":") { return "[\(host)]" }
+        return host
     }
 
     private enum ClientHTTPError: LocalizedError {
@@ -415,6 +426,7 @@ public final class AgentControlClient: ObservableObject {
                 latestSessionId: latest?.id
             )
         } catch {
+            self.lastError = error.localizedDescription
             clientLogger.debug("refreshSessions failed: \(error.localizedDescription)")
         }
     }
