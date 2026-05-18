@@ -417,6 +417,28 @@ public final class AgentControlServer {
             )
             wsChannels[ObjectIdentifier(connection)] = stream
             stream.start()
+        case "chat-subscribe":
+            // Phase 2 of the WhatsApp-smooth Sessions pipeline. Replaces
+            // iOS's 3-second `GET /chat-snapshot` HTTP polling with a
+            // long-lived WS subscription. Server pushes the full
+            // `WireChatSnapshot` on each coalesced 100ms commit window.
+            // No delta encoding in v1 — Codex's outside-voice review (D6)
+            // explicitly cut that scope until measurements show it's
+            // needed.
+            guard let sessionIdString = envelope.sessionId,
+                  let sessionId = UUID(uuidString: sessionIdString),
+                  let session = registry.session(id: sessionId)
+            else {
+                sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
+                return
+            }
+            let chatChannel = ChatStreamWebSocketChannel(
+                connection: connection,
+                session: session,
+                registry: chatStoreRegistry
+            )
+            wsChannels[ObjectIdentifier(connection)] = chatChannel
+            chatChannel.start()
         default:
             sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
         }

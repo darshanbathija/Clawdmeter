@@ -4,6 +4,16 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.0 build 33] - 2026-05-19
+
+### Fixed
+
+- **iPhone chat snapshot now arrives via WebSocket push, not 3-second HTTP polling (Phase 2 of the WhatsApp-smooth Sessions plan).** The Mac daemon's existing WS dispatcher gained a `chat-subscribe` op (`apple/ClawdmeterMac/AgentControl/AgentControlServer.swift:421`); the iOS side opens a long-lived WebSocket per `iOSChatStore` and replaces the 3s polling loop. The daemon coalesces `SessionChatStore` snapshot commits at 100ms via Combine `.debounce` and pushes a full `WireChatSnapshot` JSON text frame; iOS replaces its `@Published` snapshot wholesale and the live chat List re-renders.
+  - **New file `apple/ClawdmeterMac/AgentControl/ChatStreamWebSocketChannel.swift`** — owns the Combine subscription to a `DaemonChatStoreRegistry`-acquired store, releases on stop, sends WS text frames.
+  - **No delta encoding in v1.** Per Codex's outside-voice review (D6), shipping full-snapshot push with the bounded 500-item-per-store cap is acceptable until measurements show bandwidth is a real problem. The `.appendItems` / `.patchLastToolRun` / `.resyncRequired` cases stay deferred to v2.
+  - **Failure handling.** Three layers: exponential backoff 1→30s with jitter on transient WS errors; HTTP fallback ladder (`refresh()` for 3 cycles) after the 3rd consecutive WS failure; wire-version gate keeps iOS on HTTP polling for older Macs (wireVersion < 5). `UIApplication.didBecomeActiveNotification` observer triggers a reconnect when the last received frame is >30s stale.
+- **Daemon enforces the chat-subscribe wire envelope.** `{op: "chat-subscribe", token, sessionId}` — bearer auth + Tailscale whois gates already cover this path via the existing `routeWSSubscription` dispatcher; no new auth surface.
+
 ## [0.5.0 build 32] - 2026-05-19
 
 ### Fixed

@@ -5,12 +5,27 @@ import OSLog
 
 private let chatStoreLogger = Logger(subsystem: "com.clawdmeter.ios", category: "ChatStore")
 
-/// iOS-side mirror of the Mac's `SessionChatStore`. Subscribes to the
-/// daemon's `GET /sessions/:id/chat-snapshot` REST endpoint at refresh
-/// intervals; future WS-push wiring will plug into the same publisher.
+/// iOS-side mirror of the Mac's `SessionChatStore`. Phase 2 of the
+/// WhatsApp-smooth Sessions plan: the legacy 3-second `GET /chat-snapshot`
+/// polling loop is replaced by a long-lived `chat-subscribe` WebSocket
+/// subscription. The Mac daemon pushes a coalesced `WireChatSnapshot`
+/// frame on each commit window (~100ms); iOS replaces its `@Published`
+/// snapshot wholesale and SwiftUI re-renders the live chat List.
 ///
-/// Sessions v2 Phase 4 / T40. The Mac maintains the canonical `ChatSnapshot`
-/// (via StagingParser + reverse-tail prefetch); iOS just receives it.
+/// Failure modes & their handling:
+///   * Mac is on wireVersion < 5 (chatSubscribeMinimum) — stay on HTTP
+///     polling so a Mac that hasn't been updated yet keeps working.
+///   * WS connect fails or drops mid-stream — reconnect with exponential
+///     backoff 1→30s with jitter, resuming with a fresh subscribe (full
+///     snapshot on first frame).
+///   * `consecutiveWSFailures` exceeds the threshold — fall back to HTTP
+///     polling for `httpFallbackCycles` cycles, then retry WS. Prevents
+///     stranding the iPhone in "disconnected" state on a flapping daemon.
+///   * Background → foreground — explicit reconnect; the OS suspends WS
+///     during background and resumed frames may be stale.
+///
+/// The HTTP `refresh()` path is kept on the type and used by both the
+/// fallback ladder and external one-shot callers.
 ///
 /// Memory: bounded to LRU-2 stores via `iOSChatStoreCache` (T42).
 @MainActor
@@ -19,7 +34,36 @@ public final class iOSChatStore: ObservableObject {
     public let sessionId: UUID
 
     private weak var client: AgentControlClient?
-    private var pollTask: Task<Void, Never>?
+    private var subscribeTask: Task<Void, Never>?
+    private var fallbackPollTask: Task<Void, Never>?
+    private var foregroundObserver: NSObjectProtocol?
+    private var wsTask: URLSessionWebSocketTask?
+    private var consecutiveWSFailures: Int = 0
+
+    /// Time of the last successful frame (WS or HTTP). Used to decide
+    /// whether to force a resync on foreground.
+    private var lastFrameAt: Date = .distantPast
+
+    /// Exponential-backoff schedule between WS reconnect attempts.
+    /// Capped at 30s with a small random jitter to avoid thundering-herd
+    /// reconnects when many sessions reconnect simultaneously.
+    public static let backoffSchedule: [TimeInterval] = [1, 2, 4, 8, 16, 30]
+
+    /// After this many consecutive WS failures, fall back to HTTP polling
+    /// for `httpFallbackCycles` cycles before retrying WS. Keeps the
+    /// iPhone usable when the daemon's WS port is flapping but HTTP
+    /// still works (e.g. a misbehaving listener that crashes only the
+    /// WS thread).
+    public static let wsFailureFallbackThreshold: Int = 3
+
+    /// Number of 3-second HTTP polls performed during a fallback cycle
+    /// before the store retries the WS subscription.
+    public static let httpFallbackCycles: Int = 3
+
+    /// Idle threshold for foreground-resync. If the last frame is older
+    /// than this when the app returns from background, the store
+    /// reconnects.
+    public static let foregroundResyncThreshold: TimeInterval = 30
 
     public init(sessionId: UUID, client: AgentControlClient) {
         self.sessionId = sessionId
@@ -37,28 +81,191 @@ public final class iOSChatStore: ObservableObject {
         )
     }
 
+    deinit {
+        if let observer = foregroundObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
     public func start() {
-        guard pollTask == nil else { return }
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refresh()
-                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s poll until WS push is wired
-            }
+        guard subscribeTask == nil, fallbackPollTask == nil else { return }
+        installForegroundObserver()
+        subscribeTask = Task { [weak self] in
+            await self?.runSubscriptionLoop()
         }
     }
 
     public func stop() {
-        pollTask?.cancel()
-        pollTask = nil
+        subscribeTask?.cancel()
+        subscribeTask = nil
+        fallbackPollTask?.cancel()
+        fallbackPollTask = nil
+        wsTask?.cancel(with: .normalClosure, reason: nil)
+        wsTask = nil
+        if let observer = foregroundObserver {
+            NotificationCenter.default.removeObserver(observer)
+            foregroundObserver = nil
+        }
     }
 
+    /// HTTP one-shot snapshot fetch. Preserved for callers outside the
+    /// subscribe loop (and used by the fallback ladder).
     @MainActor
     public func refresh() async {
         guard let client else { return }
-        if let fetched = await client.fetchChatSnapshot(sessionId: sessionId),
-           fetched.updateCounter > snapshot.updateCounter || fetched.items != snapshot.items {
-            self.snapshot = fetched
+        if let fetched = await client.fetchChatSnapshot(sessionId: sessionId) {
+            // Apply only if the snapshot is genuinely newer. updateCounter
+            // is now the real chat cursor (Phase 0a); we still compare
+            // items in case an older Mac (< wireVersion 5) is replying
+            // with the legacy `session.lastEventSeq` counter that doesn't
+            // bump on chat changes.
+            if fetched.updateCounter > snapshot.updateCounter || fetched.items != snapshot.items {
+                self.snapshot = fetched
+                self.lastFrameAt = Date()
+            }
         }
+    }
+
+    // MARK: - Subscription loop
+
+    private func runSubscriptionLoop() async {
+        while !Task.isCancelled {
+            // Wire-version gate. If the Mac is too old for chat-subscribe,
+            // stay on the HTTP fallback indefinitely. The fallback ladder
+            // periodically rechecks (a Mac upgrade lands → next cycle
+            // tries WS).
+            if let wire = client?.serverWireVersion, wire < AgentControlWireVersion.chatSubscribeMinimum {
+                chatStoreLogger.debug("chat-subscribe: Mac wireVersion=\(wire); using HTTP fallback")
+                await runHTTPFallbackCycles(reason: "wire-too-old")
+                continue
+            }
+            do {
+                try await openAndStreamWS()
+                consecutiveWSFailures = 0
+            } catch {
+                consecutiveWSFailures += 1
+                chatStoreLogger.debug("chat-subscribe error #\(self.consecutiveWSFailures): \(error.localizedDescription)")
+                if consecutiveWSFailures >= Self.wsFailureFallbackThreshold {
+                    await runHTTPFallbackCycles(reason: "ws-failures")
+                    // After fallback cycles complete, reset the counter so
+                    // a single transient WS error after recovery doesn't
+                    // jump back into fallback.
+                    consecutiveWSFailures = 0
+                    continue
+                }
+                let delay = backoffDelay(for: consecutiveWSFailures)
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+        }
+    }
+
+    private func openAndStreamWS() async throws {
+        guard let client,
+              let host = client.host,
+              let token = client.token,
+              let url = URL(string: "ws://\(AgentControlClient.urlHostLiteral(host)):\(client.wsPort)/")
+        else { throw URLError(.badURL) }
+
+        let task = URLSession.shared.webSocketTask(with: URLRequest(url: url, timeoutInterval: 8))
+        wsTask = task
+        defer {
+            task.cancel(with: .normalClosure, reason: nil)
+            // Don't clobber if a newer task has already been installed.
+            if wsTask === task { wsTask = nil }
+        }
+        task.resume()
+
+        // Send the chat-subscribe envelope as the first frame. The Mac
+        // daemon's `routeWSSubscription` dispatcher reads this, validates
+        // the bearer, looks up the session, and starts pushing snapshots.
+        let envelope: [String: Any] = [
+            "op": "chat-subscribe",
+            "token": token,
+            "sessionId": sessionId.uuidString
+        ]
+        let body = try JSONSerialization.data(withJSONObject: envelope)
+        try await task.send(.data(body))
+        chatStoreLogger.info("chat-subscribe opened for session \(self.sessionId.uuidString, privacy: .public)")
+
+        // Receive snapshot frames until the connection drops or the task
+        // is cancelled. The daemon sends JSON text frames; the iOS side
+        // applies each one wholesale (full snapshot, no delta encoding in
+        // v1 per Codex D6).
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        while !Task.isCancelled {
+            let message: URLSessionWebSocketTask.Message
+            do {
+                message = try await task.receive()
+            } catch {
+                throw error
+            }
+            let data: Data
+            switch message {
+            case .data(let d):
+                data = d
+            case .string(let s):
+                data = Data(s.utf8)
+            @unknown default:
+                continue
+            }
+            if let fetched = try? decoder.decode(WireChatSnapshot.self, from: data) {
+                if fetched.updateCounter > snapshot.updateCounter || fetched.items != snapshot.items {
+                    self.snapshot = fetched
+                    self.lastFrameAt = Date()
+                }
+            }
+        }
+    }
+
+    /// Run a bounded sequence of HTTP `refresh()` polls before attempting
+    /// to re-open the WS subscription. Bounded because we want to recover
+    /// to the cheap WS path as soon as the daemon is healthy again.
+    private func runHTTPFallbackCycles(reason: String) async {
+        chatStoreLogger.info("chat-subscribe: HTTP fallback (reason=\(reason, privacy: .public))")
+        for _ in 0..<Self.httpFallbackCycles {
+            if Task.isCancelled { return }
+            await refresh()
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        }
+    }
+
+    private func backoffDelay(for attempt: Int) -> TimeInterval {
+        let idx = min(attempt - 1, Self.backoffSchedule.count - 1)
+        let base = Self.backoffSchedule[max(0, idx)]
+        // Add 0-20% jitter so a herd of sessions doesn't reconnect in
+        // lockstep on a daemon restart.
+        let jitter = base * Double.random(in: 0...0.2)
+        return base + jitter
+    }
+
+    // MARK: - Background/foreground
+
+    private func installForegroundObserver() {
+        guard foregroundObserver == nil else { return }
+        // UIApplication.didBecomeActiveNotification — observed via name to
+        // avoid forcing a UIKit import here. Forwards to a private MainActor
+        // method that forces a resync if the last frame is stale.
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("UIApplicationDidBecomeActiveNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleForegroundIfStale()
+            }
+        }
+    }
+
+    private func handleForegroundIfStale() {
+        let elapsed = Date().timeIntervalSince(lastFrameAt)
+        guard elapsed > Self.foregroundResyncThreshold else { return }
+        chatStoreLogger.info("chat-subscribe: foreground resync (\(Int(elapsed))s stale)")
+        // Cancel the current WS and let the subscription loop reconnect.
+        // The HTTP fallback path also benefits — it picks up faster after
+        // background-resume because the cancellation interrupts its
+        // current 3-second sleep.
+        wsTask?.cancel(with: .normalClosure, reason: nil)
     }
 }
 
@@ -125,12 +332,13 @@ public final class iOSChatStoreCache {
 }
 
 extension AgentControlClient {
-    /// Fetch a chat snapshot for a session. Phase 0 returns an empty
-    /// snapshot (sentinel `updateCounter == 0`); Phase 4 populates fully.
+    /// Fetch a chat snapshot for a session over HTTP. Preserved as the
+    /// fallback path; the primary path is the `chat-subscribe` WebSocket
+    /// long-lived subscription (Phase 2).
     @MainActor
     public func fetchChatSnapshot(sessionId: UUID) async -> WireChatSnapshot? {
         guard let host, let token else { return nil }
-        guard let url = URL(string: "http://\(host):\(httpPort)/sessions/\(sessionId.uuidString)/chat-snapshot") else { return nil }
+        guard let url = URL(string: "http://\(Self.urlHostLiteral(host)):\(httpPort)/sessions/\(sessionId.uuidString)/chat-snapshot") else { return nil }
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 8
