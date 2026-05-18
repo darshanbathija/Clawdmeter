@@ -4,6 +4,21 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.2 build 35] - 2026-05-19
+
+### Added
+
+- **"Session is still working" indicator on Mac + iPhone chat threads.** New `LiveSessionActivityIndicator` (`apple/ClawdmeterShared/Sources/ClawdmeterShared/AgentControl/Views/LiveSessionActivityIndicator.swift`) renders a provider-branded spinner + elapsed-time badge at the bottom-leading of the chat thread when the session's JSONL has been touched in the last 30 seconds. Claude variant: rotating Anthropic-style asterisk in terra-cotta (`#D97757`). Codex variant: pulsing three-dot sweep in codex blue (`#5C9DFF`). Drives off `chatStore.snapshot.lastEventAt` so no new server-side state is needed. Pre-v0.5.2 there was no visible signal that the agent was still working between tool runs — the user feedback that triggered this was "there's no way to know that the session is still moving forward and claude/codex is working."
+- **iPhone composer paperclip works in `.outside` mode** (read-only Recent JSONL rows that the user is about to "Continue here"). Previously the paperclip was hidden for outside-mode because there was no session id to upload against. Now picking an image stages the bytes locally, and `performSend` does a two-phase promote → upload → send dance:
+  1. `continueReadOnly(prompt: nil)` — promote the synthetic to a live `--resume` pane without sending anything yet.
+  2. `uploadAttachment(sessionId: newSessionId, ...)` for each pending attachment.
+  3. `sendPrompt(sessionId: newSessionId, text: <body-with-@paths>)` — fire the actual prompt with the resolved `@<path>` refs.
+  Single-shot (no-attachment) path unchanged. Failures on individual uploads degrade gracefully: the prompt still sends with the successful uploads + an inline "some attachments failed" message; the user doesn't lose the whole send to one bad image.
+
+### Removed
+
+- **The "Read-only" pill in the Mac chat header.** The composer's "Continue here" placeholder + the disabled-action menu state already signal read-only mode; carrying a third badge in the header for the same fact doubled visual noise. The pill at [SessionWorkspaceView.swift:992](apple/ClawdmeterMac/Workspace/SessionWorkspaceView.swift:992) is now an `EmptyView`.
+
 ## [0.5.1 build 34] - 2026-05-19
 
 ### Fixed

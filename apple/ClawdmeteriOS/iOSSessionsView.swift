@@ -1022,6 +1022,24 @@ private struct SessionDetailView: View {
                     .padding(.bottom, 12)
                     .transition(.opacity)
                 }
+                // v0.5.2 "session is still working" footer. Pulses when
+                // the JSONL has been touched within the activity window
+                // (drives off chatStore.snapshot.lastEventAt). Bottom-
+                // leading so it doesn't fight the bottom-trailing "Latest"
+                // button.
+                VStack {
+                    Spacer()
+                    HStack {
+                        LiveSessionActivityIndicator(
+                            agent: session.agent,
+                            lastEventAt: chatStore.snapshot.lastEventAt
+                        )
+                        .padding(.leading, 12)
+                        .padding(.bottom, 12)
+                        Spacer()
+                    }
+                }
+                .allowsHitTesting(false)
             }
             .animation(.easeOut(duration: 0.18), value: liveChatPinnedToBottom)
         }

@@ -989,12 +989,13 @@ private struct CenterThread: View {
                 }
             }
             Spacer()
+            // v0.5.2: the prominent "Read-only" pill was dropped per user
+            // feedback — the composer's "Continue here" placeholder + the
+            // disabled-action menu state already signal read-only mode.
+            // Carrying a third badge in the header for the same fact
+            // doubled the visual noise.
             if isReadOnly {
-                Text("Read-only")
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.green.opacity(0.15), in: Capsule())
-                    .foregroundStyle(.green)
+                EmptyView()
             } else {
                 Menu {
                     Button("Show raw terminal (⌘T)") { showingTerminalOverlay = true }
@@ -1566,6 +1567,23 @@ private struct ChatThreadScroll: View {
                     .padding(.bottom, 12)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
+                // v0.5.2 "session is still working" footer. Mirrors the
+                // iPhone indicator at bottom-leading of the chat thread.
+                // Pulses when store.snapshot.lastEventAt is within the
+                // 30s activity window.
+                VStack {
+                    Spacer()
+                    HStack {
+                        LiveSessionActivityIndicator(
+                            agent: session.agent,
+                            lastEventAt: store.snapshot.lastEventAt
+                        )
+                        .padding(.leading, 16)
+                        .padding(.bottom, 12)
+                        Spacer()
+                    }
+                }
+                .allowsHitTesting(false)
             }
             .animation(.easeOut(duration: 0.18), value: userPinnedToBottom)
         }

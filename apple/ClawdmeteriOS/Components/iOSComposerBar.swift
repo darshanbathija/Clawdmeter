@@ -13,6 +13,12 @@ struct ComposerAttachment: Identifiable, Equatable {
     var remotePath: String?
     var uploadError: String?
     var isUploading: Bool
+    /// v0.5.2: outside-mode pending payload. Set when the picker stages
+    /// an image while the session is still synthetic (no session id to
+    /// upload against). `performSend` consumes these on promote and
+    /// drives the upload against the new live session id.
+    var pendingBytes: Data?
+    var pendingExt: String?
 
     static func == (lhs: ComposerAttachment, rhs: ComposerAttachment) -> Bool {
         lhs.id == rhs.id && lhs.remotePath == rhs.remotePath && lhs.isUploading == rhs.isUploading
@@ -204,30 +210,26 @@ struct iOSComposerBar: View {
         }
     }
 
-    /// Camera-roll picker. Disabled on `.outside` rows because we don't
-    /// yet have a "stage before promote" path (would need a session id
-    /// before upload). Live sessions upload directly to
-    /// `/sessions/:id/attachments`.
+    /// Camera-roll picker. v0.5.2: enabled in BOTH `.live` and `.outside`
+    /// modes. Live sessions upload directly to `/sessions/:id/attachments`
+    /// as soon as the picker hands back data. Outside rows stage the
+    /// payload locally (no upload, no remotePath); `performSend` then
+    /// does a two-phase promote → upload → send dance so the user gets
+    /// the same single-tap UX in both modes.
     @ViewBuilder
     private var attachButton: some View {
-        if case .live = mode {
-            PhotosPicker(
-                selection: $photoPickerItems,
-                maxSelectionCount: 4,
-                matching: .images
-            ) {
-                Image(systemName: "paperclip")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-            }
-            .photosPickerStyle(.presentation)
-        } else {
-            // Outside rows: hide the paperclip until the session
-            // promotes. Less confusing than a button that errors.
-            EmptyView()
+        PhotosPicker(
+            selection: $photoPickerItems,
+            maxSelectionCount: 4,
+            matching: .images
+        ) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
         }
+        .photosPickerStyle(.presentation)
     }
 
     private var micButton: some View {
@@ -247,7 +249,6 @@ struct iOSComposerBar: View {
 
     @MainActor
     private func ingestPhotoPickerItems(_ items: [PhotosPickerItem]) async {
-        guard case .live(let session) = mode else { return }
         guard !items.isEmpty else { return }
         let picked = items
         // Clear immediately so the same image can be re-picked.
@@ -262,31 +263,56 @@ struct iOSComposerBar: View {
             let attachmentId = UUID()
             // Pre-thumbnail at 256×256 max to keep the chip layout cheap.
             let thumbData = thumbnail(from: data, max: 256) ?? data
-            attachments.append(ComposerAttachment(
-                id: attachmentId,
-                filename: "screenshot.\(ext)",
-                thumbnailData: thumbData,
-                remotePath: nil,
-                uploadError: nil,
-                isUploading: true
-            ))
-            // Kick the upload in the background; update the chip when
-            // it returns.
-            Task {
-                let remote = await client.uploadAttachment(
-                    sessionId: session.id, ext: ext, data: data
-                )
-                await MainActor.run {
-                    if let idx = attachments.firstIndex(where: { $0.id == attachmentId }) {
-                        if let remote {
-                            attachments[idx].remotePath = remote
-                            attachments[idx].isUploading = false
-                        } else {
-                            attachments[idx].isUploading = false
-                            attachments[idx].uploadError = "Upload failed"
+            switch mode {
+            case .live(let session):
+                // Live sessions: upload immediately. The chip shows a
+                // spinner until the daemon writes the file + returns
+                // its `~/Library/.../attachments/<sessionId>/...` path.
+                attachments.append(ComposerAttachment(
+                    id: attachmentId,
+                    filename: "screenshot.\(ext)",
+                    thumbnailData: thumbData,
+                    remotePath: nil,
+                    uploadError: nil,
+                    isUploading: true,
+                    pendingBytes: nil,
+                    pendingExt: nil
+                ))
+                Task {
+                    let remote = await client.uploadAttachment(
+                        sessionId: session.id, ext: ext, data: data
+                    )
+                    await MainActor.run {
+                        if let idx = attachments.firstIndex(where: { $0.id == attachmentId }) {
+                            if let remote {
+                                attachments[idx].remotePath = remote
+                                attachments[idx].isUploading = false
+                            } else {
+                                attachments[idx].isUploading = false
+                                attachments[idx].uploadError = "Upload failed"
+                            }
                         }
                     }
                 }
+            case .outside:
+                // Outside rows: stage the payload locally. We don't have
+                // a session id to upload against yet — `performSend`
+                // will promote first via `continueReadOnly(prompt: nil)`,
+                // THEN upload these bytes against the new session id,
+                // THEN call `sendPrompt` with the typed text + the
+                // resulting @path references. Chip is presented as
+                // "ready" (no spinner) since the upload-on-send dance
+                // is implicit.
+                attachments.append(ComposerAttachment(
+                    id: attachmentId,
+                    filename: "screenshot.\(ext)",
+                    thumbnailData: thumbData,
+                    remotePath: nil,
+                    uploadError: nil,
+                    isUploading: false,
+                    pendingBytes: data,
+                    pendingExt: ext
+                ))
             }
         }
     }
@@ -371,14 +397,20 @@ struct iOSComposerBar: View {
     }
 
     private var canSend: Bool {
-        // Allow sending when there's text OR at least one uploaded
-        // attachment — `@<path>` lines alone are a valid prompt that
-        // tells the agent "look at this image".
+        // Allow sending when there's text OR at least one attachment —
+        // `@<path>` lines alone are a valid prompt that tells the agent
+        // "look at this image". For outside-mode attachments the
+        // remotePath isn't set yet (upload happens on send); we count
+        // them via `pendingBytes` as ready-to-go.
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasUploaded = attachments.contains { $0.remotePath != nil }
-        guard hasText || hasUploaded else { return false }
-        // Block send while any attachment is still uploading so we
-        // don't drop bytes mid-flight.
+        let hasReadyAttachment = attachments.contains {
+            $0.remotePath != nil || $0.pendingBytes != nil
+        }
+        guard hasText || hasReadyAttachment else { return false }
+        // Block send while any LIVE-mode attachment is still uploading
+        // so we don't drop bytes mid-flight. Outside-mode attachments
+        // never have isUploading=true at this point (their upload runs
+        // inside performSend after the promote).
         let anyUploading = attachments.contains(where: \.isUploading)
         return !anyUploading
     }
@@ -430,24 +462,89 @@ struct iOSComposerBar: View {
             text = ""
             attachments.removeAll()
         case .outside(let recent, let repo):
-            // Promote the read-only synthetic to a live --resume pane on
-            // the Mac. If the Mac can't extract the CLI session id (rare
-            // — happens on truncated JSONLs), surface an inline error
-            // and leave the text in place so the user can retry.
-            let newSessionId = await client.continueReadOnly(
-                jsonlPath: recent.path,
-                repoKey: repo.key,
-                agent: recent.provider,
-                prompt: composed
-            )
-            if let newSessionId {
+            // Two phases when we have attachments staged:
+            //   1. continueReadOnly(prompt: nil) — promote the JSONL
+            //      to a live --resume pane WITHOUT sending the prompt
+            //      yet. Returns the new live session id.
+            //   2. uploadAttachment(...) for each pending attachment.
+            //      Each upload happens against the new session's
+            //      attachments dir on the Mac.
+            //   3. sendPrompt(newSessionId, text: <composed-with-paths>)
+            //      — fires the actual prompt with @<path> refs to the
+            //      just-uploaded files.
+            // No-attachment path stays single-shot: continueReadOnly
+            // forwards the prompt as the seed turn.
+            let hasPending = attachments.contains { $0.pendingBytes != nil }
+            if hasPending {
+                // Promote-only: nil prompt so the daemon doesn't send
+                // anything yet. We'll fire the prompt ourselves once
+                // the attachments are uploaded.
+                let newSessionId = await client.continueReadOnly(
+                    jsonlPath: recent.path,
+                    repoKey: repo.key,
+                    agent: recent.provider,
+                    prompt: nil
+                )
+                guard let newSessionId else {
+                    errorMessage = "Couldn't continue this session — the JSONL header doesn't carry a CLI session id, or the Mac isn't reachable."
+                    return
+                }
+                // Upload each pending attachment in order. Failures get
+                // surfaced inline; we still proceed with the successful
+                // ones so the user doesn't lose the whole send to one
+                // bad image.
+                var uploadedPaths: [String] = []
+                var anyFailures = false
+                for att in attachments {
+                    guard let bytes = att.pendingBytes,
+                          let ext = att.pendingExt else { continue }
+                    if let remote = await client.uploadAttachment(
+                        sessionId: newSessionId, ext: ext, data: bytes
+                    ) {
+                        uploadedPaths.append(remote)
+                    } else {
+                        anyFailures = true
+                    }
+                }
+                // Rebuild the prompt body with the freshly-resolved
+                // @<path> references. We discarded the original
+                // attachment-prefix because the paths weren't known
+                // when we built `composed` at the top of this func.
+                let attachmentPrefix = uploadedPaths.map { "@\($0)" }.joined(separator: "\n")
+                let body: String
+                if !attachmentPrefix.isEmpty && !trimmed.isEmpty {
+                    body = attachmentPrefix + "\n\n" + trimmed
+                } else if !attachmentPrefix.isEmpty {
+                    body = attachmentPrefix
+                } else {
+                    body = trimmed
+                }
+                if !body.isEmpty {
+                    await client.sendPrompt(sessionId: newSessionId, text: body, asFollowUp: false)
+                }
                 text = ""
-                // Refresh the sessions list so the new live session
-                // shows up alongside the existing rows.
+                attachments.removeAll()
+                if anyFailures {
+                    errorMessage = "Some attachments failed to upload — the prompt sent without them."
+                }
                 await client.refreshSessions()
                 onPromoted?(newSessionId)
             } else {
-                errorMessage = "Couldn't continue this session — the JSONL header doesn't carry a CLI session id, or the Mac isn't reachable."
+                // No attachments: existing single-shot path. continueReadOnly
+                // promotes + sends the seed prompt atomically.
+                let newSessionId = await client.continueReadOnly(
+                    jsonlPath: recent.path,
+                    repoKey: repo.key,
+                    agent: recent.provider,
+                    prompt: composed
+                )
+                if let newSessionId {
+                    text = ""
+                    await client.refreshSessions()
+                    onPromoted?(newSessionId)
+                } else {
+                    errorMessage = "Couldn't continue this session — the JSONL header doesn't carry a CLI session id, or the Mac isn't reachable."
+                }
             }
         }
     }
