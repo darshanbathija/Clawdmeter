@@ -4,6 +4,16 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.0 build 32] - 2026-05-19
+
+### Fixed
+
+- **iPhone + Mac chat lists migrated to native `List` (Phase 1 of the WhatsApp-smooth Sessions plan).** Two surfaces touched: `liveChatList` in `apple/ClawdmeteriOS/iOSSessionsView.swift:935` and `ChatThreadScroll.body` in `apple/ClawdmeterMac/Workspace/SessionWorkspaceView.swift:1488`. Both moved from `ScrollView { LazyVStack }` with per-row `.id(item.id)` (which defeats cell recycling, Stream benchmarks call this out as ~10x scroll-perf cost at 1k+ messages) to native `List` with `ForEach(items, id: \.id)`. Per-row `.onAppear`/`.onDisappear` pin-tracking pairs (fired on every row as you scrolled) collapsed to a single 1pt `Color.clear` bottom sentinel row whose appear/disappear callbacks drive `pinnedToBottom`. The scroll-on-new-item path now coalesces rapid bumps via a 50ms `Task.sleep` debounce so token-by-token streaming doesn't animate scroll-to-latest on each token. Mac chat thread has a documented fall-back to `LazyVStack`-without-`.id` if AppKit `List` underperforms on very long sessions.
+
+### Removed
+
+- `SessionDetailView.jumpLiveChatToLatest(_:animated:)` and `ChatThreadScroll.jumpToLatest(_:animated:)` — dead after the Phase 1 migration; their callers now scroll-to-sentinel directly via `proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)`.
+
 ## [0.5.0 build 31] - 2026-05-19
 
 ### Fixed

@@ -929,61 +929,86 @@ private struct SessionDetailView: View {
 
     /// Live chat for an in-session SessionDetailView. Renders the items
     /// already polled by `iOSChatStore` from the daemon's chat-snapshot
-    /// endpoint. Auto-scrolls to the latest item; floating "Jump to
-    /// latest" CTA mirrors the Mac chat thread.
+    /// endpoint.
+    ///
+    /// Phase 1 of the WhatsApp-smooth Sessions plan: migrated from
+    /// `ScrollView { LazyVStack }` with per-row `.id(item.id)` +
+    /// per-row `.onAppear`/`.onDisappear` pin tracking to native `List`.
+    /// List recycles rows internally, no explicit `.id(item.id)` defeats
+    /// recycling. Pin-to-bottom now hangs off a single 1pt
+    /// `bottomSentinel` row instead of N per-row appearance callbacks.
+    /// Scroll-on-new-item is debounced 50ms so token-by-token streaming
+    /// stops thrashing the layout.
     @ViewBuilder
     private var liveChatList: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if let planText = session.planText, !planText.isEmpty {
-                            PlanCardView(
-                                goal: session.goal,
-                                planSummary: planText,
-                                files: [],
-                                onApprove: {
-                                    Task { await client.approvePlan(sessionId: session.id) }
-                                }
-                            )
-                            .padding(.horizontal, 12)
-                            .padding(.top, 12)
-                        }
-                        if chatStore.snapshot.items.isEmpty {
-                            emptyChatPlaceholder
-                        } else {
-                            ForEach(chatStore.snapshot.items) { item in
-                                liveChatItemRow(item)
-                                    .id(item.id)
-                                    .padding(.horizontal, 12)
-                                    .onAppear {
-                                        if item.id == chatStore.snapshot.items.last?.id {
-                                            liveChatPinnedToBottom = true
-                                        }
-                                    }
-                                    .onDisappear {
-                                        if item.id == chatStore.snapshot.items.last?.id {
-                                            liveChatPinnedToBottom = false
-                                        }
-                                    }
+                List {
+                    if let planText = session.planText, !planText.isEmpty {
+                        PlanCardView(
+                            goal: session.goal,
+                            planSummary: planText,
+                            files: [],
+                            onApprove: {
+                                Task { await client.approvePlan(sessionId: session.id) }
                             }
-                        }
-                        Color.clear.frame(height: 12).id("bottom-anchor")
+                        )
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 8, trailing: 12))
                     }
-                    .padding(.vertical, 12)
+                    if chatStore.snapshot.items.isEmpty {
+                        emptyChatPlaceholder
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    } else {
+                        ForEach(chatStore.snapshot.items) { item in
+                            liveChatItemRow(item)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
+                        }
+                    }
+                    // Single-row pin sentinel. Cheaper than per-row
+                    // .onAppear / .onDisappear on every chat item — Phase 1's
+                    // primary perf win. When the sentinel is on-screen, the
+                    // user is at the tail; off-screen, they've scrolled up.
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomSentinelId)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                        .onAppear { liveChatPinnedToBottom = true }
+                        .onDisappear { liveChatPinnedToBottom = false }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
                 .onAppear {
-                    jumpLiveChatToLatest(proxy, animated: false)
+                    proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
                 }
-                .onChange(of: chatStore.snapshot.updateCounter) { _, _ in
+                .onChange(of: chatStore.snapshot.items.count) { _, _ in
+                    // Smart scroll: only fire when items grew AND user was at
+                    // the tail. Debounce 50ms so a streaming reply that grows
+                    // by one cell every few hundred milliseconds doesn't
+                    // animate scroll-to-latest on each token.
                     guard liveChatPinnedToBottom else { return }
-                    jumpLiveChatToLatest(proxy, animated: true)
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        guard liveChatPinnedToBottom else { return }
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
+                        }
+                    }
                 }
                 if !liveChatPinnedToBottom, !chatStore.snapshot.items.isEmpty {
                     Button(action: {
                         liveChatPinnedToBottom = true
-                        jumpLiveChatToLatest(proxy, animated: true)
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
+                        }
                     }) {
                         Label("Latest", systemImage: "arrow.down.circle.fill")
                             .font(.system(size: 13, weight: .semibold))
@@ -1001,6 +1026,11 @@ private struct SessionDetailView: View {
             .animation(.easeOut(duration: 0.18), value: liveChatPinnedToBottom)
         }
     }
+
+    /// Stable sentinel id used by ScrollViewReader to scroll to the tail
+    /// of the live chat List. Held as a static so the id reference doesn't
+    /// recompute per-view.
+    private static let bottomSentinelId = "live-chat-bottom-sentinel"
 
     @ViewBuilder
     private var emptyChatPlaceholder: some View {
@@ -1095,17 +1125,6 @@ private struct SessionDetailView: View {
         }
         .padding(10)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func jumpLiveChatToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
-        let target: AnyHashable = chatStore.snapshot.items.last?.id ?? "bottom-anchor"
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(target, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(target, anchor: .bottom)
-        }
     }
 
     @ViewBuilder

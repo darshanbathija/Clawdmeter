@@ -1484,41 +1484,51 @@ private struct ChatThreadScroll: View {
     var body: some View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        if store.snapshot.items.isEmpty && !store.isLoading {
-                            emptyState
-                        } else {
-                            ForEach(store.snapshot.items) { item in
-                                itemRow(item)
-                                    .id(item.id)
-                                    .padding(.horizontal, 16)
-                                    .onAppear {
-                                        if item.id == store.snapshot.items.last?.id {
-                                            userPinnedToBottom = true
-                                        }
-                                    }
-                                    .onDisappear {
-                                        if item.id == store.snapshot.items.last?.id {
-                                            userPinnedToBottom = false
-                                        }
-                                    }
-                            }
+                // Phase 1 of the WhatsApp-smooth Sessions plan: migrated
+                // from `ScrollView { LazyVStack }` with per-row `.id(item.id)`
+                // + per-row .onAppear/.onDisappear pin tracking to native
+                // `List`. AppKit List backs this on macOS; if pin behavior
+                // degrades on very long sessions (5k+ items), the
+                // documented fall-back is `LazyVStack` WITHOUT `.id` per row
+                // — keep identity stable via ForEach `id: \.id` and drive
+                // pin state from the single bottom sentinel below.
+                List {
+                    if store.snapshot.items.isEmpty && !store.isLoading {
+                        emptyState
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    } else {
+                        ForEach(store.snapshot.items) { item in
+                            itemRow(item)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         }
-                        Color.clear
-                            .frame(height: 12)
-                            .id("bottom-anchor")
                     }
-                    .padding(.vertical, 12)
+                    // Single-row pin sentinel — replaces the per-row
+                    // .onAppear/.onDisappear pin tracking that fired on
+                    // every chat-item row. One callback per scroll-edge
+                    // event instead of N per scroll-frame.
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomSentinelId)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets())
+                        .onAppear { userPinnedToBottom = true }
+                        .onDisappear { userPinnedToBottom = false }
                 }
-                .onChange(of: store.snapshot.updateCounter) { _, _ in
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .onChange(of: store.snapshot.items.count) { _, _ in
                     stickToBottomIfPinned(proxy, items: store.snapshot.items.count)
                 }
                 .onAppear {
-                    jumpToLatest(proxy, animated: false)
+                    proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
                     lastScrollItemCount = store.snapshot.items.count
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        jumpToLatest(proxy, animated: false)
+                        proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
                     }
                 }
 
@@ -1528,7 +1538,9 @@ private struct ChatThreadScroll: View {
                 if !userPinnedToBottom, !store.snapshot.items.isEmpty {
                     Button(action: {
                         userPinnedToBottom = true
-                        jumpToLatest(proxy, animated: true)
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
+                        }
                     }) {
                         Label("Jump to latest", systemImage: "arrow.down.circle.fill")
                             .font(.system(size: 11, weight: .semibold))
@@ -1549,6 +1561,10 @@ private struct ChatThreadScroll: View {
         }
     }
 
+    /// Stable sentinel id used by ScrollViewReader to scroll to the tail.
+    /// Held as a static so the id reference doesn't recompute per-render.
+    private static let bottomSentinelId = "mac-chat-bottom-sentinel"
+
     /// Tracks whether the user is reading the tail (last item visible).
     /// When false, auto-scroll stops yanking on new turns and the "Jump
     /// to latest" button surfaces. Updated by the per-row appear/disappear.
@@ -1562,26 +1578,24 @@ private struct ChatThreadScroll: View {
         // Only auto-scroll when the user is currently watching the tail.
         // Reading history shouldn't be interrupted by a new agent turn.
         guard userPinnedToBottom else { return }
+        // Skip animation for big jumps (paste-of-history) or while the
+        // store is still doing its initial backfill — animating each step
+        // produces a visible scroll-blur.
         let animate = !(delta > 5 || store.isLoading)
-        jumpToLatest(proxy, animated: animate)
-        if animate {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                jumpToLatest(proxy, animated: true)
+        // Coalesce rapid bumps via a 50ms debounce so a streaming reply
+        // that grows the items array on every commit doesn't animate
+        // scroll-to-latest per token. The single belt-and-suspenders
+        // re-scroll after 100ms catches late-arriving layout passes.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard userPinnedToBottom else { return }
+            if animate {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(Self.bottomSentinelId, anchor: .bottom)
             }
-        }
-    }
-
-    private func jumpToLatest(_ proxy: ScrollViewProxy, animated: Bool) {
-        // LazyVStack tip: scrolling to a sentinel "bottom-anchor" Color.clear
-        // is unreliable because the anchor may be culled before it's
-        // realised. Scrolling to the LAST ITEM's id works every time.
-        let target: AnyHashable = store.snapshot.items.last?.id ?? "bottom-anchor"
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(target, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(target, anchor: .bottom)
         }
     }
 

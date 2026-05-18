@@ -39,7 +39,7 @@ public final class SessionFileResolver: @unchecked Sendable {
     private let lock = NSLock()
 
     public init(
-        codexSessionsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
+        codexSessionsRoot: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".codex/sessions", isDirectory: true),
         activityGrace: TimeInterval = 5 * 60,
         resolveClaudeURL: @escaping @Sendable (AgentSession) -> URL?
