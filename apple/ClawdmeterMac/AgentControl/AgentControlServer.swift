@@ -739,6 +739,9 @@ public final class AgentControlServer {
         t.register(method: "POST", pattern: "/sessions/:id/unarchive") { [weak self] _, conn, params in
             self?.handleArchive(sessionId: params["id"] ?? "", archived: false, connection: conn)
         }
+        t.register(method: "POST", pattern: "/sessions/:id/rename") { [weak self] req, conn, params in
+            self?.handleRename(sessionId: params["id"] ?? "", request: req, connection: conn)
+        }
         t.register(method: "POST", pattern: "/sessions/:id/model") { [weak self] req, conn, params in
             await self?.handleChangeModel(sessionId: params["id"] ?? "", request: req, connection: conn)
         }
@@ -2071,6 +2074,37 @@ public final class AgentControlServer {
         } else {
             registry.unarchive(id: uuid)
         }
+        sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
+    }
+
+    /// v0.5.4 — `POST /sessions/:id/rename` with body `{name: String?}`.
+    /// Empty/whitespace-only names normalize to nil at the registry
+    /// (clearing the custom name → sidebar falls back to repoDisplayName).
+    private func handleRename(
+        sessionId: String,
+        request: HTTPRequest,
+        connection: NWConnection
+    ) {
+        guard let uuid = UUID(uuidString: sessionId),
+              registry.session(id: uuid) != nil
+        else {
+            sendResponse(.notFound, on: connection)
+            return
+        }
+        let decoder = JSONDecoder()
+        guard let body = try? decoder.decode(RenameSessionRequest.self, from: request.body) else {
+            sendResponse(.badRequest, on: connection)
+            return
+        }
+        // Cap inbound name length so a paired-but-malicious device can't
+        // push a multi-MB string into sessions.json (matches the
+        // compose-draft 64KB cap pattern; 200 chars is generous for a
+        // human-readable label).
+        if let n = body.name, n.count > 200 {
+            sendResponse(.badRequest, on: connection)
+            return
+        }
+        registry.rename(id: uuid, name: body.name)
         sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
     }
 

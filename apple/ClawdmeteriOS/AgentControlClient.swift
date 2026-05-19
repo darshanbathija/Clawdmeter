@@ -268,6 +268,18 @@ public final class AgentControlClient: ObservableObject {
                         body: AutopilotRequest(enabled: enabled))
     }
 
+    /// v0.5.4: set or clear the session's user-facing display name. The
+    /// daemon normalizes empty/whitespace-only strings to nil. Pass nil
+    /// to clear and fall back to `repoDisplayName`.
+    @MainActor
+    public func renameSession(sessionId: UUID, name: String?) async {
+        await postBody(path: "/sessions/\(sessionId.uuidString)/rename",
+                        body: RenameSessionRequest(name: name))
+        // Refresh the sessions list so the renamed entry shows up with
+        // the new label everywhere the iPhone UI reads `displayLabel`.
+        await refreshSessions()
+    }
+
     // MARK: - T33 multi-pane terminal endpoints
 
     @MainActor

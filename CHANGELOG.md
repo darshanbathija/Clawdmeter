@@ -4,6 +4,22 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.4 build 37] - 2026-05-19
+
+### Added
+
+- **Rename sessions** to anything memorable. New `customName: String?` field on `AgentSession` (optional, decoder-tolerant — v3 files decode cleanly with `customName = nil`). When set, replaces the default sidebar / chat-header label so a session can be "Refactor checkout flow" instead of "Clawdmeter / Claude".
+  - **Mac UI**: right-click any session in the sidebar → "Rename…". Alert with a text field; "Save" sets the name, "Clear name" wipes it back to the repo-derived default, "Cancel" discards. Header label + sidebar row + raw-terminal overlay title all pick up the custom name; falls back to goal, then repo name.
+  - **iPhone UI**: long-press any session row → "Rename…". Same three-button alert. Navigation title on the session detail view uses the custom name too.
+  - **Daemon endpoint**: `POST /sessions/:id/rename` with `{name: String?}`. Empty/whitespace-only strings normalize to nil at the registry; cap of 200 chars for the inbound name so paired peers can't push huge strings into `sessions.json`. iOS client: `AgentControlClient.renameSession(sessionId:name:)`.
+  - **Persistence**: `AgentSessionRegistry` schema bumped 3 → 4. Pre-v4 readers silently drop the field; post-v4 reading a v3 file populates `customName = nil`. No migration required.
+
+### Internal
+
+- New `AgentSession.displayLabel` computed property — prefers `customName` (trimmed, non-empty) over `repoDisplayName`. Use this anywhere a session display label is rendered going forward.
+- `AgentSessionRegistry.with(...)` helper gains a `customName: String??` parameter following the same `Optional<T>.some(nil)` "explicitly nil out" pattern as `archivedAt`, `effort`, etc.
+- New `RenameSessionRequest` DTO in `Protocol.swift` so iOS + Mac share the wire shape.
+
 ## [0.5.3 build 36] - 2026-05-19
 
 ### Fixed

@@ -276,6 +276,11 @@ private struct SidebarPane: View {
     @AppStorage("clawdmeter.sidebar.sorting")  private var sortingRaw: String  = SessionSorting.recency.rawValue
     @AppStorage("clawdmeter.sidebar.status")   private var statusRaw: String   = SessionStatusFilter.all.rawValue
 
+    /// v0.5.4: rename sheet state. When non-nil, the rename alert is
+    /// up and bound to `renameInput`. Cleared on cancel/save.
+    @State private var renameTarget: AgentSession?
+    @State private var renameInput: String = ""
+
     private var grouping: SessionGrouping {
         SessionGrouping(rawValue: groupingRaw) ?? .repo
     }
@@ -297,6 +302,39 @@ private struct SidebarPane: View {
             footer
         }
         .background(sidebarBg)
+        // v0.5.4 rename sheet. Bound to renameTarget; presents when set.
+        .alert(
+            "Rename session",
+            isPresented: Binding(
+                get: { renameTarget != nil },
+                set: { presented in
+                    if !presented { renameTarget = nil; renameInput = "" }
+                }
+            )
+        ) {
+            TextField("Name", text: $renameInput)
+                .textFieldStyle(.roundedBorder)
+            Button("Save") {
+                if let target = renameTarget {
+                    model.registry.rename(id: target.id, name: renameInput)
+                }
+                renameTarget = nil
+                renameInput = ""
+            }
+            Button("Clear name", role: .destructive) {
+                if let target = renameTarget {
+                    model.registry.rename(id: target.id, name: nil)
+                }
+                renameTarget = nil
+                renameInput = ""
+            }
+            Button("Cancel", role: .cancel) {
+                renameTarget = nil
+                renameInput = ""
+            }
+        } message: {
+            Text(renameTarget.map { "Currently: \($0.displayLabel)" } ?? "")
+        }
     }
 
     private var sidebarHeader: some View {
@@ -712,6 +750,10 @@ private struct SidebarPane: View {
             let (s, d) = pair
             sessionRow(s, isOpen: model.openSessionId == s.id, depth: d)
                 .contextMenu {
+                    Button("Rename…") {
+                        renameTarget = s
+                        renameInput = s.customName ?? ""
+                    }
                     if s.archivedAt == nil {
                         Button("Archive") { model.registry.archive(id: s.id) }
                     } else {
@@ -822,6 +864,13 @@ private struct SidebarPane: View {
     }
 
     private func sessionTitle(_ session: AgentSession) -> String {
+        // v0.5.4 — user-supplied customName wins. Fall back to the
+        // session's stated goal, then to a synthesized provider+status
+        // label so brand-new sessions are still identifiable.
+        if let custom = session.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            return custom
+        }
         if let goal = session.goal, !goal.isEmpty { return goal }
         return "\(session.agent.rawValue.capitalized) · \(session.status.rawValue)"
     }
@@ -965,7 +1014,9 @@ private struct CenterThread: View {
         HStack(spacing: 10) {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.goal ?? session.repoDisplayName)
+                // v0.5.4: user-supplied customName takes precedence
+                // over the session's goal in the chat header.
+                Text(headerLabel(for: session))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -1042,11 +1093,25 @@ private struct CenterThread: View {
         .padding(.vertical, 10)
     }
 
+    /// v0.5.4 header-label helper. User-set `customName` wins over the
+    /// session's goal, with the repo name as the final fallback. Mirrors
+    /// `AgentSession.displayLabel` but keeps the existing "goal" tier
+    /// because the chat header has historically preferred the user-typed
+    /// prompt as a label.
+    private func headerLabel(for session: AgentSession) -> String {
+        if let custom = session.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            return custom
+        }
+        if let goal = session.goal, !goal.isEmpty { return goal }
+        return session.repoDisplayName
+    }
+
     @ViewBuilder
     private var terminalOverlay: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Raw terminal — \(session.goal ?? session.repoDisplayName)")
+                Text("Raw terminal — \(headerLabel(for: session))")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Button("Close (Esc)") { showingTerminalOverlay = false }

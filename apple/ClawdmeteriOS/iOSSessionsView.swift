@@ -20,6 +20,10 @@ struct iOSSessionsView: View {
     /// the user makes a choice for a repo, it sticks for the session.
     @State private var manuallyExpanded: Set<String> = []
     @State private var manuallyCollapsed: Set<String> = []
+    /// v0.5.4 rename sheet state. When non-nil, the rename alert is
+    /// presented and bound to `renameInput`. Cleared on cancel/save.
+    @State private var renameTarget: AgentSession?
+    @State private var renameInput: String = ""
 
     var body: some View {
         NavigationStack {
@@ -30,6 +34,41 @@ struct iOSSessionsView: View {
                     emptyState
                 } else {
                     repoList
+                }
+            }
+            // v0.5.4 rename alert. Triggered from session-row context menus
+            // (long-press). Bound to renameTarget; presents when set.
+            .alert(
+                "Rename session",
+                isPresented: Binding(
+                    get: { renameTarget != nil },
+                    set: { presented in
+                        if !presented { renameTarget = nil; renameInput = "" }
+                    }
+                )
+            ) {
+                TextField("Name", text: $renameInput)
+                Button("Save") {
+                    if let target = renameTarget {
+                        Task { await client.renameSession(sessionId: target.id, name: renameInput) }
+                    }
+                    renameTarget = nil
+                    renameInput = ""
+                }
+                Button("Clear name", role: .destructive) {
+                    if let target = renameTarget {
+                        Task { await client.renameSession(sessionId: target.id, name: nil) }
+                    }
+                    renameTarget = nil
+                    renameInput = ""
+                }
+                Button("Cancel", role: .cancel) {
+                    renameTarget = nil
+                    renameInput = ""
+                }
+            } message: {
+                if let target = renameTarget {
+                    Text("Currently: \(target.customName?.isEmpty == false ? target.customName! : target.agent.rawValue.capitalized)")
                 }
             }
             .navigationTitle("Sessions")
@@ -211,6 +250,15 @@ struct iOSSessionsView: View {
                     SessionDetailView(session: session, client: client)
                 } label: {
                     SessionRow(session: session)
+                }
+                // v0.5.4 long-press → rename.
+                .contextMenu {
+                    Button {
+                        renameTarget = session
+                        renameInput = session.customName ?? ""
+                    } label: {
+                        Label("Rename…", systemImage: "pencil")
+                    }
                 }
                 // Phase 5 swipe-leading: positive-intent quick actions.
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -501,6 +549,15 @@ struct iOSSessionsView: View {
             } label: {
                 SessionRow(session: session)
             }
+            // v0.5.4 long-press → rename (date-grouped path).
+            .contextMenu {
+                Button {
+                    renameTarget = session
+                    renameInput = session.customName ?? ""
+                } label: {
+                    Label("Rename…", systemImage: "pencil")
+                }
+            }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if session.planText != nil && session.status == .planning {
                     Button {
@@ -562,14 +619,16 @@ private struct SessionRow: View {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(session.agent.rawValue.capitalized)
+                    // v0.5.4 — user-set customName wins as the primary
+                    // label; falls back to the provider name when nil.
+                    Text(rowTitle)
                         .font(.subheadline.weight(.medium))
                     Text(session.status.rawValue)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let goal = session.goal {
-                    Text(goal)
+                if let subtitle = rowSubtitle {
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -581,6 +640,27 @@ private struct SessionRow: View {
                     .foregroundStyle(Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0))
             }
         }
+    }
+
+    /// Primary row title. Custom name wins; provider falls back when nil.
+    private var rowTitle: String {
+        if let custom = session.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            return custom
+        }
+        return session.agent.rawValue.capitalized
+    }
+
+    /// Subtitle — the session's stated goal when not already promoted to
+    /// the title. Returning nil hides the secondary line entirely.
+    private var rowSubtitle: String? {
+        if let custom = session.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            // Custom name shown above; preserve the provider hint here.
+            return "\(session.agent.rawValue.capitalized) · \(session.goal ?? "")"
+                .trimmingCharacters(in: .whitespaces.union(.init(charactersIn: "·")))
+        }
+        return session.goal
     }
 
     private var statusColor: Color {
@@ -889,7 +969,7 @@ private struct SessionDetailView: View {
                 terminalView
             }
         }
-        .navigationTitle(session.repoDisplayName)
+        .navigationTitle(session.displayLabel)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { iOSChatStoreCache.shared.protectSession(session.id) }
         .onDisappear { iOSChatStoreCache.shared.unprotectSession(session.id) }

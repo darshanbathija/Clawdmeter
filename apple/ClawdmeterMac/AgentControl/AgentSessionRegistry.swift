@@ -300,6 +300,7 @@ public final class AgentSessionRegistry: ObservableObject {
         effort: ReasoningEffort?? = nil,
         abPairSessionId: UUID?? = nil,
         abPairDecidedAt: Date?? = nil,
+        customName: String?? = nil,
         lastEventSeq: UInt64? = nil
     ) -> AgentSession {
         AgentSession(
@@ -324,8 +325,21 @@ public final class AgentSessionRegistry: ObservableObject {
             parentSessionId: s.parentSessionId,
             effort: Self.resolve(effort, fallback: s.effort),
             abPairSessionId: Self.resolve(abPairSessionId, fallback: s.abPairSessionId),
-            abPairDecidedAt: Self.resolve(abPairDecidedAt, fallback: s.abPairDecidedAt)
+            abPairDecidedAt: Self.resolve(abPairDecidedAt, fallback: s.abPairDecidedAt),
+            customName: Self.resolve(customName, fallback: s.customName)
         )
+    }
+
+    /// v0.5.4: set or clear the user-supplied display name. Empty /
+    /// whitespace-only strings normalize to nil so the sidebar row +
+    /// chat header fall back to `repoDisplayName`.
+    public func rename(id: UUID, name: String?) {
+        let normalized: String?? = {
+            guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty else { return .some(nil) }
+            return .some(trimmed)
+        }()
+        update(id: id) { s in with(s, customName: normalized) }
     }
 
     private static func resolve<T>(_ override: T??, fallback: T?) -> T? {
@@ -347,10 +361,12 @@ public final class AgentSessionRegistry: ObservableObject {
     }
 
     /// v3 (Sessions v2): adds optional `effort`, `abPairSessionId`,
-    /// `abPairDecidedAt` to AgentSession. v1/v2 files decode cleanly
-    /// because the new keys default to nil in `AgentSession.init(from:)`.
-    /// Downgrade path: a v2 reader silently drops these fields.
-    private static let currentSchemaVersion = 3
+    /// `abPairDecidedAt` to AgentSession.
+    /// v4 (v0.5.4): adds optional `customName` (user-supplied display
+    /// name). v1/v2/v3 files decode cleanly because the new keys
+    /// default to nil in `AgentSession.init(from:)`. Downgrade path:
+    /// older readers silently drop these fields.
+    private static let currentSchemaVersion = 4
 
     private func load() {
         guard FileManager.default.fileExists(atPath: storeURL.path) else { return }

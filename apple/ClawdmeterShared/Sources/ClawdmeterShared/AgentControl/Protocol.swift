@@ -555,6 +555,13 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
     /// someone picks a winner; cleared on un-pair.
     public let abPairDecidedAt: Date?
 
+    /// v0.5.4: user-supplied display name. When set, replaces
+    /// `repoDisplayName` in the sidebar row + chat header so the session
+    /// can be labeled by what it's actually working on rather than just
+    /// the repo name. Empty / whitespace-only strings normalize to nil
+    /// at the daemon's rename handler.
+    public let customName: String?
+
     public init(
         id: UUID,
         repoKey: String,
@@ -577,7 +584,8 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         parentSessionId: UUID? = nil,
         effort: ReasoningEffort? = nil,
         abPairSessionId: UUID? = nil,
-        abPairDecidedAt: Date? = nil
+        abPairDecidedAt: Date? = nil,
+        customName: String? = nil
     ) {
         self.id = id
         self.repoKey = repoKey
@@ -601,6 +609,7 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         self.effort = effort
         self.abPairSessionId = abPairSessionId
         self.abPairDecidedAt = abPairDecidedAt
+        self.customName = customName
     }
 
     public init(from decoder: Decoder) throws {
@@ -633,6 +642,21 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
         self.effort = (try? c.decodeIfPresent(ReasoningEffort.self, forKey: .effort)) ?? nil
         self.abPairSessionId = (try? c.decodeIfPresent(UUID.self, forKey: .abPairSessionId)) ?? nil
         self.abPairDecidedAt = (try? c.decodeIfPresent(Date.self, forKey: .abPairDecidedAt)) ?? nil
+        // v0.5.4 schema addition: customName. Optional + decoder-tolerant
+        // so v3 sessions.json files decode cleanly (the field just stays
+        // nil).
+        self.customName = (try? c.decodeIfPresent(String.self, forKey: .customName)) ?? nil
+    }
+
+    /// User-facing label for the session. Prefers the user-set
+    /// `customName` (when non-empty), otherwise falls back to
+    /// `repoDisplayName` so existing sessions render identically.
+    public var displayLabel: String {
+        if let name = customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !name.isEmpty {
+            return name
+        }
+        return repoDisplayName
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -641,7 +665,21 @@ public struct AgentSession: Codable, Hashable, Sendable, Identifiable {
              status, planText, createdAt, lastEventAt, lastEventSeq,
              mode, archivedAt,
              terminalPanes, scheduledFollowUps, parentSessionId,
-             effort, abPairSessionId, abPairDecidedAt
+             effort, abPairSessionId, abPairDecidedAt,
+             customName
+    }
+}
+
+// MARK: - Rename request
+
+/// `POST /sessions/:id/rename` body. The daemon normalizes empty/
+/// whitespace-only strings to `nil` (clearing the custom name) before
+/// persisting.
+public struct RenameSessionRequest: Codable, Sendable {
+    public let name: String?
+
+    public init(name: String?) {
+        self.name = name
     }
 }
 
