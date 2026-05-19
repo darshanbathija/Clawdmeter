@@ -1150,7 +1150,21 @@ private struct SessionDetailView: View {
         case .message(let msg):
             liveMessageBubble(msg)
         case .toolRun(_, let pairs):
-            liveToolRunCard(pairs: pairs)
+            // v0.5.5: partition file-edit pairs into their own row chips
+            // mirroring Claude Code's "Edited <file> +N -M" CLI rendering.
+            // Non-edit pairs fold into the existing tool-run disclosure.
+            let editPairs = pairs.filter { $0.call.editStats != nil }
+            let otherPairs = pairs.filter { $0.call.editStats == nil }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(editPairs) { pair in
+                    if let stats = pair.call.editStats {
+                        EditDiffRow(stats: stats, resultBody: pair.result?.body)
+                    }
+                }
+                if !otherPairs.isEmpty {
+                    liveToolRunCard(pairs: otherPairs)
+                }
+            }
         }
     }
 

@@ -28,6 +28,12 @@ public struct ChatMessage: Identifiable, Hashable, Sendable, Codable {
     public let detail: String?
     public let at: Date
     public let isError: Bool
+    /// v0.5.5: structured Edit/MultiEdit/Write summary populated at parse
+    /// time. Drives the specialized "Edited <file> +N -M" chat row that
+    /// replaces the generic "Ran 1 command" card for file-edit tool
+    /// calls. Nil for any other tool (Bash, Read, Grep, etc.) and for
+    /// non-tool messages.
+    public let editStats: EditStats?
 
     public init(
         id: String,
@@ -36,7 +42,8 @@ public struct ChatMessage: Identifiable, Hashable, Sendable, Codable {
         body: String,
         detail: String? = nil,
         at: Date,
-        isError: Bool = false
+        isError: Bool = false,
+        editStats: EditStats? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -45,6 +52,108 @@ public struct ChatMessage: Identifiable, Hashable, Sendable, Codable {
         self.detail = detail
         self.at = at
         self.isError = isError
+        self.editStats = editStats
+    }
+
+    // Custom Decodable init so v0 messages persisted before the editStats
+    // field landed still decode cleanly. `decodeIfPresent` defaults the
+    // new field to nil; everything else is unchanged.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.kind = try c.decode(Kind.self, forKey: .kind)
+        self.title = try c.decode(String.self, forKey: .title)
+        self.body = try c.decode(String.self, forKey: .body)
+        self.detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        self.at = try c.decode(Date.self, forKey: .at)
+        self.isError = (try? c.decode(Bool.self, forKey: .isError)) ?? false
+        self.editStats = try c.decodeIfPresent(EditStats.self, forKey: .editStats)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, title, body, detail, at, isError, editStats
+    }
+}
+
+/// v0.5.5: file-edit summary attached to Edit/MultiEdit/Write tool_use
+/// `ChatMessage`s so the chat row can render `Edited <basename> +N -M`
+/// without re-parsing the raw `input` JSON downstream. Drives the
+/// inline disclosure that mirrors Claude Code's CLI rendering.
+public struct EditStats: Hashable, Sendable, Codable {
+    public enum Kind: String, Hashable, Sendable, Codable {
+        case edit
+        case multiEdit
+        case write
+    }
+
+    public let kind: Kind
+    public let filePath: String
+    public let additions: Int
+    public let deletions: Int
+
+    public init(kind: Kind, filePath: String, additions: Int, deletions: Int) {
+        self.kind = kind
+        self.filePath = filePath
+        self.additions = additions
+        self.deletions = deletions
+    }
+
+    /// Basename of the file path — what gets shown in the row label so
+    /// long path strings don't dominate. Falls back to the full path
+    /// when the basename can't be derived.
+    public var basename: String {
+        let last = (filePath as NSString).lastPathComponent
+        return last.isEmpty ? filePath : last
+    }
+
+    /// Try to derive an EditStats from a Claude tool_use's raw `input`
+    /// dict + the tool's `name`. Returns nil for non-file-edit tools or
+    /// when the expected fields are missing.
+    public static func fromClaudeInput(_ input: Any?, toolName: String) -> EditStats? {
+        guard let dict = input as? [String: Any] else { return nil }
+        switch toolName {
+        case "Edit":
+            guard let path = dict["file_path"] as? String,
+                  let oldStr = dict["old_string"] as? String,
+                  let newStr = dict["new_string"] as? String else { return nil }
+            return EditStats(
+                kind: .edit,
+                filePath: path,
+                additions: lineCount(newStr),
+                deletions: lineCount(oldStr)
+            )
+        case "MultiEdit":
+            guard let path = dict["file_path"] as? String,
+                  let edits = dict["edits"] as? [[String: Any]] else { return nil }
+            var add = 0
+            var del = 0
+            for e in edits {
+                if let oldStr = e["old_string"] as? String { del += lineCount(oldStr) }
+                if let newStr = e["new_string"] as? String { add += lineCount(newStr) }
+            }
+            return EditStats(kind: .multiEdit, filePath: path, additions: add, deletions: del)
+        case "Write":
+            guard let path = dict["file_path"] as? String,
+                  let content = dict["content"] as? String else { return nil }
+            // Write replaces (or creates) the file wholesale. Without
+            // knowing the prior content at parse time we can't compute
+            // deletions; show only additions. Caller's view renders
+            // `+N` and omits the `-` half when deletions is 0.
+            return EditStats(kind: .write, filePath: path, additions: lineCount(content), deletions: 0)
+        default:
+            return nil
+        }
+    }
+
+    private static func lineCount(_ s: String) -> Int {
+        if s.isEmpty { return 0 }
+        // Count the number of NEWLINE-terminated lines. An empty string
+        // yields 0; a single line with no trailing newline yields 1.
+        var n = 1
+        for c in s where c == "\n" { n += 1 }
+        // Trailing newline shouldn't add an extra empty line.
+        if s.hasSuffix("\n") { n -= 1 }
+        return max(n, 1)
     }
 }
 

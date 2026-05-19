@@ -744,9 +744,15 @@ struct ParsedLine: Sendable {
                     let inputDetail = SessionChatStore.expandedDetail(
                         block["input"], for: name
                     )
+                    // v0.5.5: Edit / MultiEdit / Write get a structured
+                    // EditStats so the chat view can render the
+                    // "Edited <file> +N -M" chip instead of folding
+                    // into the generic "Ran N commands" card.
+                    let editStats = EditStats.fromClaudeInput(block["input"], toolName: name)
                     out.append(ChatMessage(
                         id: "call:\(toolUseId)", kind: .toolCall, title: name,
-                        body: inputSummary, detail: inputDetail, at: at
+                        body: inputSummary, detail: inputDetail, at: at,
+                        editStats: editStats
                     ))
                 default:
                     break

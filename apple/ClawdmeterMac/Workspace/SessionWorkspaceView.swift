@@ -1715,7 +1715,22 @@ private struct ChatThreadScroll: View {
         case .message(let m):
             messageRow(m)
         case .toolRun(let id, let pairs):
-            toolRunGroup(id: id, pairs: pairs)
+            // v0.5.5: file-edit pairs (Edit / MultiEdit / Write) render
+            // as inline EditDiffRow chips ("Edited <file> +N -M"); the
+            // rest still fold into the existing "Ran N commands"
+            // disclosure.
+            let editPairs = pairs.filter { $0.call.editStats != nil }
+            let otherPairs = pairs.filter { $0.call.editStats == nil }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(editPairs) { pair in
+                    if let stats = pair.call.editStats {
+                        EditDiffRow(stats: stats, resultBody: pair.result?.body)
+                    }
+                }
+                if !otherPairs.isEmpty {
+                    toolRunGroup(id: id, pairs: otherPairs)
+                }
+            }
         }
     }
 

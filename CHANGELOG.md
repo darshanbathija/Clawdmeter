@@ -4,6 +4,17 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.5 build 38] - 2026-05-19
+
+### Added
+
+- **Inline edit-diff rows in the chat thread.** `Edit`, `MultiEdit`, and `Write` tool_use calls now render as their own dedicated chip — `Edited <basename> +N -M ›` (or `Wrote <basename> +N ›` for new file writes) — matching Claude Code's CLI rendering. Other tool runs (Bash, Read, Grep, etc.) still fold into the existing "Ran N commands" disclosure group. Tap the chip to expand the full file path and the tool_result body in line.
+  - **New `EditStats` struct** in `ClawdmeterShared` with a `fromClaudeInput(_:toolName:)` factory that counts additions / deletions from the tool's `old_string` / `new_string` (Edit), the sum across an `edits` array (MultiEdit), or the `content` length (Write — deletions reported as 0 since the prior content isn't known at parse time).
+  - **New `EditDiffRow` view** in `ClawdmeterShared/AgentControl/Views/` renders the chip on both iOS and macOS. Watch fallback is a compact non-disclosure layout since `DisclosureGroup` isn't available on watchOS.
+  - **`ChatMessage` gains an optional `editStats: EditStats?` field** populated at parse time in `SessionChatStore`'s tool_use branch. Decoder-tolerant — v0 messages persisted before this field landed decode cleanly with `editStats = nil`.
+  - **Chat thread renderers on iOS + Mac** partition each `ChatItem.toolRun`'s pairs into edit pairs (rendered as standalone `EditDiffRow`s) and non-edit pairs (folded into the existing tool-run card). Mixed groups render edits at top, then the other commands beneath.
+  - **Codex `apply_patch` is out of scope** for v0.5.5 — only Claude's Edit/MultiEdit/Write are detected. Codex tools still render via the generic tool-run card.
+
 ## [0.5.4 build 37] - 2026-05-19
 
 ### Added
