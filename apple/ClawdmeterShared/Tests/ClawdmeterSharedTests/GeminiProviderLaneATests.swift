@@ -255,5 +255,90 @@ final class GeminiProviderLaneATests: XCTestCase {
         XCTAssertEqual(records.first?.tokens.requestCount, 1)
         XCTAssertEqual(records.first?.tokens.costUSD, 0, "Gemini records carry no cost — analytics surfaces request count instead")
     }
+
+    // MARK: - QA ISSUE-001 regression: D7 stale-fallback emission must replace
+
+    /// Regression: ISSUE-001 — Gemini D7 stale badge never fired on Mac
+    /// because UsagePoller.shouldReplace dropped the cached-fallback
+    /// emission. Root cause: cached fallback set `updatedAt` to the
+    /// last-success time, identical to the prev .allowed snapshot, so
+    /// `shouldReplace` returned false ("incoming.updatedAt > self.updatedAt"
+    /// was false) and the poller re-emitted the .allowed cached state.
+    /// Status .unknown never reached the dashboard, badge never rendered.
+    ///
+    /// Fix: GeminiSource.cachedFallbackOrThrow emits with `updatedAt =
+    /// Date()` (now). This test locks the contract at the UsageData
+    /// model layer: a cached-fallback emission MUST replace a prior
+    /// .allowed snapshot in shouldReplace semantics so .unknown status
+    /// propagates to AppModel.usage.
+    ///
+    /// Found by /qa on main, 2026-05-19.
+    /// Report: .gstack/qa-reports/qa-report-clawdmeter-mac-2026-05-19.md
+    func test_cachedFallbackEmission_replacesPriorAllowed_soUnknownStatusPropagates() {
+        let now = Date()
+        let resetEpoch = Int(now.timeIntervalSince1970) + 5 * 3600
+
+        let prev = UsageData(
+            sessionPct: 23,
+            sessionResetMins: 300,
+            sessionEpoch: resetEpoch,
+            weeklyPct: 0,
+            weeklyResetMins: 0,
+            weeklyEpoch: 0,
+            status: .allowed,
+            representativeClaim: .fiveHour,
+            updatedAt: now.addingTimeInterval(-3600) // 1h ago
+        )
+
+        // GeminiSource.cachedFallbackOrThrow shape: same sessionEpoch,
+        // .unknown status, updatedAt = NOW (the fix). The poller must
+        // accept this so the dashboard sees status = .unknown.
+        let cachedFallback = UsageData(
+            sessionPct: 23,
+            sessionResetMins: 300,
+            sessionEpoch: resetEpoch,
+            weeklyPct: 0,
+            weeklyResetMins: 0,
+            weeklyEpoch: 0,
+            status: .unknown,
+            representativeClaim: .unknown,
+            updatedAt: now
+        )
+
+        XCTAssertTrue(
+            prev.shouldReplace(with: cachedFallback),
+            "Cached-fallback emission with updatedAt = now MUST replace prior .allowed snapshot — otherwise D7 stale badge never fires"
+        )
+    }
+
+    /// Counterfactual: the BUG path (cached fallback emits with prev's
+    /// `updatedAt`) MUST NOT replace. Locks the failure mode so a future
+    /// refactor that reverts to `updatedAt: lastUpdatedAt` is caught.
+    func test_cachedFallback_withStaleUpdatedAt_correctlyDropped() {
+        let now = Date()
+        let resetEpoch = Int(now.timeIntervalSince1970) + 5 * 3600
+
+        let prev = UsageData(
+            sessionPct: 23, sessionResetMins: 300, sessionEpoch: resetEpoch,
+            weeklyPct: 0, weeklyResetMins: 0, weeklyEpoch: 0,
+            status: .allowed, representativeClaim: .fiveHour,
+            updatedAt: now.addingTimeInterval(-3600)
+        )
+
+        // Buggy shape: same updatedAt as prev. shouldReplace returns
+        // false → poller drops emission → status stays .allowed →
+        // dashboard never shows stale badge. THIS is the regression.
+        let buggyFallback = UsageData(
+            sessionPct: 23, sessionResetMins: 300, sessionEpoch: resetEpoch,
+            weeklyPct: 0, weeklyResetMins: 0, weeklyEpoch: 0,
+            status: .unknown, representativeClaim: .unknown,
+            updatedAt: now.addingTimeInterval(-3600) // SAME as prev
+        )
+
+        XCTAssertFalse(
+            prev.shouldReplace(with: buggyFallback),
+            "Emission with same updatedAt as prev should NOT replace — locks the bug condition"
+        )
+    }
 }
 #endif

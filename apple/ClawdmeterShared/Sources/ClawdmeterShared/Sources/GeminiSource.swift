@@ -317,8 +317,17 @@ public final class GeminiSource: AISource, @unchecked Sendable {
     private func cachedFallbackOrThrow(reason: String) throws -> UsageData {
         let now = Date()
         let nowEpoch = Int(now.timeIntervalSince1970)
-        if let last = lastSession, let updated = lastUpdatedAt {
+        if let last = lastSession, lastUpdatedAt != nil {
             let mins = max(0, (last.resetEpoch - nowEpoch + 59) / 60)
+            // `updatedAt: now` (not `lastUpdatedAt`) so UsagePoller's E3
+            // shouldReplace check accepts this emission — otherwise the
+            // poller drops the .unknown status update (same epoch + same
+            // updatedAt → "stale, ignore") and the dashboard keeps
+            // displaying the last .allowed snapshot, never firing the D7
+            // orange stale badge. The badge wording reads "Stale · updated
+            // N secs ago"; "N secs ago" = "last poll attempt", while
+            // sessionEpoch still points at the cached reset target so the
+            // countdown remains honest.
             return UsageData(
                 sessionPct: last.pct,
                 sessionResetMins: mins,
@@ -328,7 +337,7 @@ public final class GeminiSource: AISource, @unchecked Sendable {
                 weeklyEpoch: lastWeekly?.resetEpoch ?? nowEpoch + 7 * 24 * 3600,
                 status: .unknown,
                 representativeClaim: .unknown,
-                updatedAt: updated
+                updatedAt: now
             )
         }
         logger.info("Gemini fallback no-cache: reason=\(reason, privacy: .public); surfacing as dataSourceContractViolation so UI shows Connecting…")
