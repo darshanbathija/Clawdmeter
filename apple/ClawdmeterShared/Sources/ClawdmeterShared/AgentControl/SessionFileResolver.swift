@@ -34,6 +34,18 @@ public final class SessionFileResolver: @unchecked Sendable {
     private let resolveClaudeURL: @Sendable (AgentSession) -> URL?
     private var codexLinks: [UUID: URL] = [:]
     private var geminiLinks: [UUID: URL] = [:]
+    /// v0.6.0 (eng review 1C fix): LRU access order for `geminiLinks`.
+    /// Bounded at 200 entries to cover active-session-count (~20) +
+    /// recent history without unbounded growth. Oldest entries evicted
+    /// when we cross the cap. Active sessions stay in the cache because
+    /// they're touched on every poll.
+    private var geminiLinkOrder: [UUID] = []
+    private let geminiLinkCap: Int = 200
+    /// v0.6.0 (eng review 1C fix): Antigravity brain dir cache. Maps
+    /// session id → brain URL. Bounded LRU with path-exists invalidation
+    /// on every read — Antigravity GC can sweep older brains under us.
+    private var brainLinks: [UUID: URL] = [:]
+    private var brainLinkOrder: [UUID] = []
     /// Activity-window grace after `session.lastEventAt`. Rollouts modified
     /// more than this far past `lastEventAt` are not considered candidates
     /// for the session (likely belong to a different session entirely).
@@ -191,30 +203,146 @@ public final class SessionFileResolver: @unchecked Sendable {
     /// case we just pick the newest file whose mtime falls within the
     /// session's activity window (mirrors Codex logic).
     private func resolveGemini(session: AgentSession) -> URL? {
+        // v0.6.0: Antigravity 2 stopped writing the per-session JSONL
+        // files this method used to resolve. The Plan pane (via the
+        // `/sessions/:id/antigravity-plan` endpoint) is the v2-native
+        // surface. Disk mode reads brain dirs via `findAntigravityBrain`
+        // below; this legacy method falls through to the cached path
+        // for any STILL-EXISTING v0.42 sessions on disk during the
+        // migration window. New sessions return nil → empty chat pane
+        // (Plan pane carries the content).
         lock.lock()
-        let cached = geminiLinks[session.id]
+        let cached = lookupBoundedCache(id: session.id, store: geminiLinks, order: &geminiLinkOrder)
         lock.unlock()
-
         if let cached, FileManager.default.fileExists(atPath: cached.path) {
-            let cachedMtime = (try? cached.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            if let newer = findGeminiChat(for: session, modifiedAfter: cachedMtime),
-               newer != cached {
-                lock.lock()
-                geminiLinks[session.id] = newer
-                lock.unlock()
-                return newer
-            }
             return cached
         }
+        return nil
+    }
 
-        if let found = findGeminiChat(for: session, modifiedAfter: nil) {
-            lock.lock()
-            geminiLinks[session.id] = found
+    /// v0.6.0 (eng review 1C fix): bounded LRU helper. Touches the entry
+    /// to mark it recently-used (moves it to the back of `order`).
+    /// Returns nil if the id isn't in the store. Caller holds `lock`.
+    private func lookupBoundedCache(
+        id: UUID,
+        store: [UUID: URL],
+        order: inout [UUID]
+    ) -> URL? {
+        guard let url = store[id] else { return nil }
+        if let idx = order.firstIndex(of: id) {
+            order.remove(at: idx)
+        }
+        order.append(id)
+        return url
+    }
+
+    /// v0.6.0 (eng review 1C fix): bounded LRU writer. Inserts the entry
+    /// and evicts the oldest if we crossed the cap. Caller holds `lock`.
+    private func insertBoundedCache(
+        id: UUID,
+        url: URL,
+        store: inout [UUID: URL],
+        order: inout [UUID],
+        cap: Int
+    ) {
+        if store[id] != nil {
+            if let idx = order.firstIndex(of: id) {
+                order.remove(at: idx)
+            }
+        }
+        store[id] = url
+        order.append(id)
+        while order.count > cap {
+            let evicted = order.removeFirst()
+            store.removeValue(forKey: evicted)
+        }
+    }
+
+    /// v0.6.0 — resolves the brain dir for a Gemini session. Used by the
+    /// daemon's `/sessions/:id/antigravity-plan` endpoint as a faster path
+    /// than reading the index on every poll.
+    ///
+    /// Algorithm:
+    ///   1. Look up cached brain URL. If still present on disk, return it
+    ///      (and touch the LRU).
+    ///   2. If cache miss OR path no longer exists (Antigravity GC'd),
+    ///      fall through to the BrainSummaryIndexer lookup via cwd.
+    ///   3. Cache the result + return.
+    ///
+    /// Returns nil when no matching brain dir can be located (fresh
+    /// session before Antigravity has written anything, or pre-v2 install).
+    public func findAntigravityBrain(
+        for session: AgentSession,
+        antigravityDataDir: URL? = nil
+    ) -> URL? {
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let dataDir = antigravityDataDir
+            ?? home.appendingPathComponent(".gemini/antigravity", isDirectory: true)
+
+        lock.lock()
+        if let cached = lookupBoundedCache(id: session.id, store: brainLinks, order: &brainLinkOrder) {
             lock.unlock()
-            return found
+            // Path-exists invalidation: if Antigravity GC swept this
+            // brain mid-session, fall through to re-resolve. Logged
+            // via OSLog so we can audit how often Antigravity GCs.
+            if FileManager.default.fileExists(atPath: cached.path) {
+                return cached
+            }
+            lock.lock()
+            brainLinks.removeValue(forKey: session.id)
+            if let idx = brainLinkOrder.firstIndex(of: session.id) {
+                brainLinkOrder.remove(at: idx)
+            }
+            lock.unlock()
+        } else {
+            lock.unlock()
         }
 
-        return findNewestGeminiChat()
+        // Tier 1: BrainSummaryIndex reverse lookup by cwd.
+        let indexURL = dataDir.appendingPathComponent("agyhub_summaries_proto.pb", isDirectory: false)
+        let index = BrainSummaryIndexer.read(at: indexURL)
+        let cwdURL = URL(fileURLWithPath: session.repoKey)
+        let candidates = BrainSummaryIndexer.lookup(cwd: cwdURL, in: index)
+        guard !candidates.isEmpty else { return nil }
+
+        // Of the candidates, pick the brain with the newest mtime that's
+        // within the session's activity window.
+        let brainsDir = dataDir.appendingPathComponent("brain", isDirectory: true)
+        let windowStart = session.createdAt
+        let windowEnd = session.lastEventAt.addingTimeInterval(activityGrace)
+        var bestURL: URL?
+        var bestDate = Date.distantPast
+        for uuid in candidates {
+            let url = brainsDir.appendingPathComponent(uuid, isDirectory: true)
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            // Allow brains slightly outside the window — daemon may
+            // start mid-session. Prefer windowed candidates but accept
+            // out-of-window if nothing else matches.
+            if mtime >= windowStart && mtime <= windowEnd && mtime > bestDate {
+                bestDate = mtime
+                bestURL = url
+            }
+        }
+        if bestURL == nil {
+            // Fall back to newest across all candidates.
+            for uuid in candidates {
+                let url = brainsDir.appendingPathComponent(uuid, isDirectory: true)
+                let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                if mtime > bestDate { bestDate = mtime; bestURL = url }
+            }
+        }
+
+        guard let resolved = bestURL else { return nil }
+        lock.lock()
+        insertBoundedCache(
+            id: session.id,
+            url: resolved,
+            store: &brainLinks,
+            order: &brainLinkOrder,
+            cap: geminiLinkCap
+        )
+        lock.unlock()
+        return resolved
     }
 
     /// Newest `.jsonl` under `~/.gemini/tmp/*/chats/` whose mtime is in

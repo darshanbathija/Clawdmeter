@@ -74,14 +74,25 @@ public final class GeminiSource: AISource, @unchecked Sendable {
     private var lastWeekly: (pct: Int, resetEpoch: Int)?
     private var lastUpdatedAt: Date?
 
+    /// v0.6.0: Antigravity 2 adds the `daily-cloudcode-pa.googleapis.com`
+    /// host alongside the legacy `cloudcode-pa.googleapis.com`. We try
+    /// the daily host first (fresher quota model for daily-channel users
+    /// the live Antigravity Electron app prefers), fall back to legacy
+    /// on 404/5xx. Cached per-host last-good state means subsequent polls
+    /// stick to whichever host responded successfully last.
+    private let dailyQuotaEndpoint: URL
+    private var preferredQuotaHost: URL?  // nil = try daily first
+
     public init(
         tokenProvider: TokenProvider,
         urlSession: URLSession? = nil,
         quotaEndpoint: URL = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")!,
+        dailyQuotaEndpoint: URL = URL(string: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")!,
         loadCodeAssistEndpoint: URL = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!
     ) {
         self.tokenProvider = tokenProvider
         self.quotaEndpoint = quotaEndpoint
+        self.dailyQuotaEndpoint = dailyQuotaEndpoint
         self.loadCodeAssistEndpoint = loadCodeAssistEndpoint
         if let urlSession {
             self.urlSession = urlSession
@@ -136,7 +147,40 @@ public final class GeminiSource: AISource, @unchecked Sendable {
     // MARK: - retrieveUserQuota
 
     private func callRetrieveUserQuota(token: String, project: String) async throws -> UsageData {
-        var req = URLRequest(url: quotaEndpoint)
+        // v0.6.0 dual-host: prefer daily-cloudcode-pa (fresher channel
+        // Antigravity 2 uses); fall back to legacy cloudcode-pa on 404/5xx.
+        // Cached `preferredQuotaHost` skips the daily attempt once we know
+        // it failed, so we don't slow every poll with a fail-then-fallback
+        // round-trip.
+        let primary = preferredQuotaHost ?? dailyQuotaEndpoint
+        let secondary = (primary == quotaEndpoint) ? dailyQuotaEndpoint : quotaEndpoint
+        do {
+            let usage = try await callRetrieveUserQuota(token: token, project: project, endpoint: primary)
+            preferredQuotaHost = primary // remember good host
+            return usage
+        } catch let e as AISourceError where {
+            switch e {
+            case .dataSourceContractViolation, .unauthenticated, .rateLimited: return true
+            default: return false
+            }
+        }() {
+            // These errors aren't host-related — re-throw without trying
+            // the secondary (auth/rate-limit/contract-failure means the
+            // server understood us, it just disagrees).
+            throw e
+        } catch {
+            // Other errors (network, 404, 5xx) → fall over to the
+            // secondary host. If that ALSO fails, the cachedFallback
+            // path inside the helper handles the .unknown emission.
+            logger.info("Gemini quota primary host \(primary.host ?? "?") failed; trying secondary \(secondary.host ?? "?")")
+            let usage = try await callRetrieveUserQuota(token: token, project: project, endpoint: secondary)
+            preferredQuotaHost = secondary
+            return usage
+        }
+    }
+
+    private func callRetrieveUserQuota(token: String, project: String, endpoint: URL) async throws -> UsageData {
+        var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
