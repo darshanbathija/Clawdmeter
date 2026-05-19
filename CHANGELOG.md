@@ -4,24 +4,68 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
-## [0.5.11] - 2026-05-19
+## [0.5.11 build 44] - 2026-05-19
 
-### Added
+End-to-end Gemini provider across Mac, iOS, and Watch. v0.5.10 shipped the shared-package scaffolding (`AgentKind.gemini`, `ModelCatalog.gemini`, `GeminiSource`, `GeminiTokenProvider`, `GeminiUsageParser`, `byProvider` snapshot refactor, wire v6). The 0.5.11 work spans three batches — an initial Mac UI wiring pass, an autonomous multiplatform completion pass (iOS Live tab + Watch meter + Live Activity + X3 cross-model fixes), and two medium-severity /qa fixes — all shipped together. Tests 250 → 335 across the cycle. Mac / iOS / Watch schemes all BUILD SUCCEEDED.
 
-- **Gemini provider is now end-to-end on Mac.** v0.5.10 shipped the shared-package scaffolding (`AgentKind.gemini`, `ModelCatalog.gemini`, `GeminiSource`, `GeminiTokenProvider`, `GeminiUsageParser`, `byProvider` snapshot refactor, wire v6); v0.5.11 wires the Mac UI on top so users see the third provider end-to-end:
-  - **3rd menu bar item.** `AppDelegate.geminiController` (`NSStatusItem`) tracks the new `clawdmeter.gemini.menuBarShown` AppStorage key. Toggle from the dashboard's "Menu bar:" row.
-  - **3rd dashboard column with responsive collapse.** ≥1200pt = Claude / Codex / Gemini side-by-side; 800-1200pt = Claude+Codex top, Gemini below; <800pt = single-column vertical. Mirrors the Sessions tab's <1100pt collapse pattern (eng review D10).
-  - **New "Providers" Settings tab.** `ProvidersSettingsView` between General and Sessions surfaces per-provider connection state plus a stale-token banner for Gemini when `~/.gemini/oauth_creds.json`'s `expiry_date` is in the past (D4 UX — includes a Copy-command button for `gemini auth login`).
-  - **`ProviderConfig.supportsAutoRevive` flag.** Replaces the hardcoded `model.config.id == "claude"` check in `DashboardView.swift:365` and `PopoverView.swift:252`. Claude → true; Codex/Gemini → false. Eliminates a known code smell per the CEO review's E3 #3 / Codex P1(6) refactor-depth finding.
-  - **`MenuBarGaugeView.isTemplateAsset` recognises `GeminiLogo`.** New `GeminiLogo.svg` shipped in both Mac `Resources/` and iOS `Assets.xcassets/`.
-- **`UsageEnvelope` extended with per-provider fallback (X1 fix).** The `/usage` HTTP response now ships dual-shape: legacy `{claude, codex}` top-level fields PLUS a new `usage: [String: UsageData]` dict. Clients call `usageData(for: providerID)` which prefers the dict per-provider and falls back to legacy independently for each id. Prevents data-loss when the dict is partial (e.g. server emits `usage: {gemini: …}` while legacy fields carry Claude + Codex — naïve envelope-level fallback would drop Claude + Codex; per-provider fallback merges all three). `AgentControlServer.handleGetUsage` emits both shapes; legacy fields are removed at wireVersion 7 (future v0.8).
-- **`GeminiProviderLaneATests` (12 new tests).** Cover X2 TokenTotals back-compat (missing `requestCount` decodes to 0, not `keyNotFound`); `byProvider` Codable round-trip + legacy v8 migration on decode; compat getters returning `.empty` for missing keys (E3 #4); `AgentKind` tolerant decoder for unknown raws (D9); per-provider envelope fallback (E2/X1); v5 envelope decodes cleanly on v6 client; `GeminiTokenProvider` parses real-shape `oauth_creds.json` + detects expiry; `GeminiUsageParser` user-turn extraction with slash-command filtering. 276 → 288 shared tests, 0 failures.
+### Mac dashboard
+
+- **3rd menu bar item.** `AppDelegate.geminiController` (`NSStatusItem`) tracks the new `clawdmeter.gemini.menuBarShown` AppStorage key. Toggle from the dashboard's "Menu bar:" row.
+- **3rd dashboard column with responsive collapse.** ≥1200pt = Claude / Codex / Gemini side-by-side; 800-1200pt = Claude+Codex top, Gemini below; <800pt = single-column vertical. Mirrors the Sessions tab's <1100pt collapse pattern (eng review D10).
+- **Gemini column drops the phantom "Weekly limits" card.** cloudcode-pa returns a single `refreshTime` per model — no weekly bucket exists upstream. New `ProviderConfig.hasWeeklyWindow` flag (Claude/Codex = true, Gemini = false) gates the `Weekly limits` VStack so the column stops inventing a window that doesn't exist. iOS GeminiSection already drops its WeeklyCard for the same reason. (Found by /qa; ISSUE-002.)
+- **D7 stale-data badge fires on cached fallback.** `GeminiSource.cachedFallbackOrThrow` was emitting with `updatedAt = lastUpdatedAt`, which `UsagePoller.shouldReplace`'s E3 ordering rejected as stale, so `.unknown` status never reached the dashboard. Fix: emit cached fallback with `updatedAt = Date()` so the poller forwards the `.unknown` status and the dashboard renders the orange "Stale · updated Xs ago" badge. `sessionEpoch` still points at the cached reset target so the countdown stays honest. (Found by /qa; ISSUE-001. Regression-tested at the `UsageData.shouldReplace` model layer in `GeminiProviderLaneATests`.)
+- **D4 stale-token banner + D8 "Not detected" subtitle.** Orange inline banner with a Copy-command button shown when `model.needsReauth` is true; subtitle reads "Not detected · install gemini CLI" when `~/.gemini/oauth_creds.json` is missing.
+- **New "Providers" Settings tab.** `ProvidersSettingsView` between General and Sessions surfaces per-provider connection state plus the same stale-token banner. Gemini is labeled "5h refresh" (not "Session N% · Weekly N%" like the cost-bearing providers).
+- **`ProviderConfig.supportsAutoRevive` flag.** Replaces the hardcoded `model.config.id == "claude"` check in `DashboardView.swift` and `PopoverView.swift`. Routes through new shared `AutoReviveSupport.supports(_:)` so the contract is testable. Claude → true; Codex/Gemini → false. (E3 #3 / Codex P1(6) refactor depth.)
+- **`MenuBarGaugeView.isTemplateAsset` recognises `GeminiLogo`.** New `GeminiLogo.svg` shipped in Mac `Resources/`, iOS `Assets.xcassets/`, and the Mac/iOS widget extensions.
+
+### iOS Live tab + Live Activity + Settings
+
+- **Live tab Gemini section, gated on `supportsGemini` (X3-A).** `AgentControlClient.hasWireVersionMismatch` rewritten from strict equality to forward-compat semantics — fires only when `serverWireVersion < composeDraftMinimum`. New per-feature flags `supportsGemini` / `supportsChatSubscribe` / `supportsComposeDraft` route through shared `AgentControlWireVersion.supports*(_:)` helpers so the iOS gating contract is testable. v5 Mac paired to v6 iOS hides Gemini correctly; v7 Mac paired to v6 iOS keeps rendering (no false mismatch banner).
+- **`ProviderToggleHeader` shows the Gemini logo only when the paired Mac advertises wire v6+.** Falls back to Claude when an older Mac is paired; renders an `UpdateMacForGeminiCard` ("Update Clawdmeter on Mac") inside the pane when the user has the Gemini chip selected but the Mac is too old.
+- **`GeminiSection` mirrors the Mac column.** Single 5h-refresh card (no weekly), Google-blue accent (#4285F4), `WaitingForMacCard` empty state when the daemon hasn't shipped the first snapshot.
+- **iOS Gemini Live Activity (D5).** New `GeminiQuotaLiveActivityAttributes` + `GeminiQuotaLiveActivityContentState` (shared package) + iOS coordinator + widget bundle entry. Lock-screen pill + Dynamic Island compact/expanded/minimal + always-on dimmed "G" + stale-flag triangle. Coordinator runs in `UsageModel.refreshFromDaemon` whenever a Gemini snapshot lands.
+- **`UsageModel` per-provider snapshots.** New `@Published geminiSnapshot: UsageStore.Snapshot?` ingested via the X1 `usageData(for: "gemini")` per-provider fallback path, mirrored to App Group + WatchTokenBridge.
+- **Settings sheet documents Mac-mirrored architecture.** New Codex + Gemini explainer sections clarifying that both providers' tokens live on the Mac and forward to iOS via the paired daemon. No iOS paste-token surface for Gemini (mirror-only path).
+
+### Watch
+
+- **`WatchTokenBridge` carries a `usageByProvider` dict alongside the legacy single `usage` field.** v5 watches keep reading the Claude snapshot through the old path; v6+ watches subscribe to the new dict for Codex + Gemini. `WatchUsageModel` gains a `usageByProvider` published property + `codexUsage` / `geminiUsage` accessors and writes per-provider App Group snapshots so complications can pick up Codex + Gemini.
+- **Watch `ContentView` adds compact Codex + Gemini meters under the primary Claude gauge.** Each shows `N%` + "Resets X" with the provider's accent color (Codex blue, Gemini Google blue). Single-line by design — cloudcode-pa is single-window.
+
+### X3 cross-model fixes
+
+- **X3-C analytics trunk: `AnalyticsRepoList` is now provider-keyed.** Per-row "+N gem" pill renders when a repo has Gemini requests; ranking folds Gemini into the keyset so Gemini-only repos still surface; ranking falls back to request-count share when total cost is zero. Tooltip lists Claude + Codex + Gemini breakdown.
+- **X3-D `ProviderHardcodingAuditTests` regression test.** Scans `apple/` Swift sources for binary `agent == .claude ? "Claude" : "Codex"` patterns and asserts each remaining hit is on a documented allow-list with a justification comment. Catches new provider-specific branches that slip in during implementation. Refactored 6 visible-mislabel sites through the new shared `AgentKindUI` helper (`assetName(for:)` / `displayName(for:)` / `accentRGB(for:)` / `isTemplate(for:)`): iOS sessions list/composer, Mac SessionWorkspaceView, Mac widgets, Mac SessionsView plan-mode help, Mac recentSubtitleRow.
+- **`AgentSpawnerGeminiArgvTests`.** Argv-building logic factored into shared `GeminiArgvBuilder.argv(...)` so the test suite (8 cases) locks the exact `gemini -m <model> --approval-mode {plan|auto_edit|yolo} --resume <id>` argv contract, including the plan > yolo > auto_edit precedence rule.
+
+### Wire / Codable / cross-platform
+
+- **`UsageEnvelope` per-provider fallback (X1).** `/usage` HTTP response ships dual-shape: legacy `{claude, codex}` fields plus `usage: [String: UsageData]` dict. Clients call `usageData(for: providerID)` which prefers the dict per-provider and falls back to legacy independently per id. Prevents data-loss when the dict is partial (e.g. server emits `usage: {gemini: …}` while legacy fields carry Claude + Codex). `AgentControlServer.handleGetUsage` emits both shapes; legacy fields removed at wireVersion 7 (future v0.8).
+- **`AgentControlWireVersion` static helpers.** New `hasMismatch(serverWireVersion:)` + `supportsGemini` / `supportsChatSubscribe` / `supportsComposeDraft` so the version-check contract is testable from shared (was previously inline in `AgentControlClient`).
+- **`TokenTotals.requestCount: Int` Codable back-compat (X2).** Custom `init(from:)` uses `decodeIfPresent(Int.self, forKey: .requestCount) ?? 0` so existing iCloud snapshots + `analytics-cache.json` written before `requestCount` existed decode cleanly without `keyNotFound`.
+
+### Tests
+
+- **335/335 in `ClawdmeterShared`** (was 250 at v0.5.0). New suites cover the contracts shipped in this version:
+  - `GeminiProviderLaneATests` (14) — TokenTotals back-compat, byProvider Codable round-trip + legacy v8 migration, compat getters, AgentKind tolerant decoder, per-provider envelope fallback, oauth_creds.json parse + expiry, slash-command filter; plus 2 regression tests for ISSUE-001's `UsageData.shouldReplace` contract.
+  - `WireEnvelopeDualShapeTests` (7) — dual-shape per-provider fallback semantics.
+  - `WireMixedVersionPairingTests` (6) — v5↔v6 and v6↔v7 forward-compat.
+  - `UsageHistorySnapshotCompatGetterTests` (4) — `.empty` returns for missing provider keys.
+  - `TokenTotalsRequestCountTests` (4) — Codable back-compat lock.
+  - `ProviderConfigAutoReviveTests` (4) — contract for the new `AutoReviveSupport.supports(_:)` source of truth.
+  - `AgentSpawnerGeminiArgvTests` (8) — argv flag contract.
+  - `GeminiJSONLParserTests` (11) — chat-IDE rendering of `~/.gemini/tmp/<repo>/chats/session-*.jsonl`.
+  - `ProviderHardcodingAuditTests` (1) — repo-wide audit for unintended binary provider checks.
+
+### Tooling
+
 - **`tools/refresh-pricing.sh` extended.** Filter regex now matches `gemini-*` and `gemma-*` alongside the existing `claude-*` / `gpt-*` / `o[0-9]+*` / `chatgpt-*` patterns so the embedded `pricing.json` covers Google's model name families.
-- **`TODOS.md` v0.7 section.** Captures the explicit deferrals from the eng review: OpenRouter integration, Antigravity unified-quota slice, per-request token estimation for Gemini cost, iOS Gemini Live tab, Watch Gemini meter, iOS Live Activity for Gemini (D5), `AgentSpawner.geminiArgv` + Sessions runtime (E3 #2), and adversarial Google quota endpoint tests (D3 retro). Each entry has implementation hooks for the follow-up branch.
+- **`TODOS.md` v0.7 section.** Eng review deferrals + the two low-severity /qa deferrals (ISSUE-003 menu-bar item race, ISSUE-004 by-repo "+N gem" pill missing). Each has hypothesis + hook + effort estimate.
 
 ### Build
 
-- Mac + iOS + Watch schemes all build clean (`CODE_SIGNING_ALLOWED=NO`).
+- Mac + iOS + Watch schemes all build clean. xcodegen + `xcodebuild build` verified on all three schemes after the QA fixes.
 - Pre-existing Swift 6 warnings (NSLock-in-async, `AppModel.consume` actor isolation) inherited from `CodexTokenProvider` / existing `AppModel` patterns; not introduced by this branch.
 
 ## [0.5.10 build 43] - 2026-05-19
