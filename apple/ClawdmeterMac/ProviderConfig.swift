@@ -19,6 +19,16 @@ public struct ProviderConfig: Identifiable, Sendable {
     /// check at `DashboardView.swift` and `PopoverView.swift`.
     public let supportsAutoRevive: Bool
 
+    /// True when this provider exposes a separate weekly quota window
+    /// alongside the 5h session window. Claude has both (Anthropic Max plan
+    /// session + weekly cap). Codex has both (wham/usage session + weekly).
+    /// Gemini cloudcode-pa returns ONE quota per model with a single
+    /// refresh time — no weekly bucket. The Mac dashboard's Weekly limits
+    /// card hides when this is false so we don't lie about a window that
+    /// doesn't exist upstream. Settings → Providers also drives the "5h
+    /// refresh" vs "Session N% · Weekly N%" copy from this flag.
+    public let hasWeeklyWindow: Bool
+
     public init(
         id: String,
         displayName: String,
@@ -27,7 +37,8 @@ public struct ProviderConfig: Identifiable, Sendable {
         reviveEndpoint: URL,
         reviveAuthVersion: String?,
         storageKeyPrefix: String,
-        supportsAutoRevive: Bool = false
+        supportsAutoRevive: Bool = false,
+        hasWeeklyWindow: Bool = true
     ) {
         self.id = id
         self.displayName = displayName
@@ -37,6 +48,7 @@ public struct ProviderConfig: Identifiable, Sendable {
         self.reviveAuthVersion = reviveAuthVersion
         self.storageKeyPrefix = storageKeyPrefix
         self.supportsAutoRevive = supportsAutoRevive
+        self.hasWeeklyWindow = hasWeeklyWindow
     }
 
     public static let claude = ProviderConfig(
@@ -74,6 +86,9 @@ public struct ProviderConfig: Identifiable, Sendable {
         reviveEndpoint: URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")!,
         reviveAuthVersion: nil,
         storageKeyPrefix: "clawdmeter.gemini",
-        supportsAutoRevive: AutoReviveSupport.supports("gemini")
+        supportsAutoRevive: AutoReviveSupport.supports("gemini"),
+        // cloudcode-pa returns a single refreshTime per model — no weekly
+        // bucket exists upstream. Dashboard column hides Weekly limits.
+        hasWeeklyWindow: false
     )
 }

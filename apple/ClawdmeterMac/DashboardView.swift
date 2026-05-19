@@ -342,30 +342,36 @@ private struct ProviderColumn: View {
                 }
             }
 
-            Divider().background(dividerColor)
+            // Weekly limits — only render when the provider exposes a real
+            // weekly bucket upstream (Claude/Codex). Gemini's cloudcode-pa
+            // returns a single refreshTime per model, so a 0% "Weekly limits"
+            // card here would invent a window that doesn't exist. iOS
+            // GeminiSection already drops its WeeklyCard for the same reason.
+            if model.config.hasWeeklyWindow {
+                Divider().background(dividerColor)
 
-            // Weekly limits
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Weekly limits")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(primaryText)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Weekly limits")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(primaryText)
 
-                Text("All models")
-                    .font(.system(size: 13))
-                    .foregroundStyle(secondaryText)
-
-                ProgressTrack(value: progressValue(model.usage?.weeklyPct))
-                HStack {
-                    Text("\(model.usage?.weeklyPct ?? 0)% used")
-                        .font(.system(size: 14))
+                    Text("All models")
+                        .font(.system(size: 13))
                         .foregroundStyle(secondaryText)
-                    Spacer()
-                    if let usage = model.usage {
-                        let weeklyDate = Date(timeIntervalSince1970: TimeInterval(usage.weeklyEpoch))
-                        (Text("Resets ") + Text(weeklyDate, style: .relative))
+
+                    ProgressTrack(value: progressValue(model.usage?.weeklyPct))
+                    HStack {
+                        Text("\(model.usage?.weeklyPct ?? 0)% used")
                             .font(.system(size: 14))
                             .foregroundStyle(secondaryText)
-                            .monospacedDigit()
+                        Spacer()
+                        if let usage = model.usage {
+                            let weeklyDate = Date(timeIntervalSince1970: TimeInterval(usage.weeklyEpoch))
+                            (Text("Resets ") + Text(weeklyDate, style: .relative))
+                                .font(.system(size: 14))
+                                .foregroundStyle(secondaryText)
+                                .monospacedDigit()
+                        }
                     }
                 }
             }
