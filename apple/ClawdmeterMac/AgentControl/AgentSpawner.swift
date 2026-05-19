@@ -120,6 +120,11 @@ public enum AgentSpawner {
                 effort: request.effort,
                 autopilot: autopilot
             ) ?? []
+        case .gemini:
+            // Gemini spawner not implemented yet — wire schema knows about
+            // it (wire v6) but there's no `gemini` CLI to launch. Empty
+            // argv triggers the missing-binary surface in the caller.
+            return []
         }
     }
 
@@ -155,6 +160,10 @@ public enum AgentSpawner {
                 acceptEdits: acceptEdits,
                 resumeSessionId: resumeSessionId
             ) ?? []
+        case .gemini:
+            // See note in `argv(for:autopilot:)` — Gemini spawner not
+            // implemented; respawn falls back to empty argv.
+            return []
         }
     }
 

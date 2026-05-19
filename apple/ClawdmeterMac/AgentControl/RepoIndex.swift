@@ -118,6 +118,9 @@ public actor RepoIndex {
         var recentByRepo: [String: [RecentSession]] = [:]
         let liveCutoff = Date().addingTimeInterval(-Self.liveNowWindow)
         let recentCutoff = Date().addingTimeInterval(-Self.recentActivityWindow)
+        // Snapshot the alias store once per refresh so we fold custom names
+        // into RecentSession rows without taking the store's lock per file.
+        let aliases = JSONLAliasStore.shared.snapshot()
 
         // Source 1: ~/.claude/projects/ directory names (encoded cwds)
         let claudeProjects = home.appendingPathComponent(".claude/projects")
@@ -153,7 +156,8 @@ public actor RepoIndex {
                                         path: jsonl.path,
                                         lastModified: mtime,
                                         provider: .claude,
-                                        firstPrompt: result.prompt
+                                        firstPrompt: result.prompt,
+                                        customName: aliases[jsonl.path]
                                     )
                                 )
                             }
@@ -186,7 +190,8 @@ public actor RepoIndex {
                     path: meta.path,
                     lastModified: meta.mtime,
                     provider: .codex,
-                    firstPrompt: result.prompt
+                    firstPrompt: result.prompt,
+                    customName: aliases[meta.path]
                 )
             )
         }

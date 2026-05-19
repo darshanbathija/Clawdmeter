@@ -280,6 +280,18 @@ public final class AgentControlClient: ObservableObject {
         await refreshSessions()
     }
 
+    /// v0.5.10: rename a Recent JSONL row (not a Clawdmeter-owned session).
+    /// Keyed by absolute path on the daemon side, persisted to
+    /// `~/.clawdmeter/jsonl-aliases.json`. Pass nil/empty to clear.
+    @MainActor
+    public func renameJSONLAlias(path: String, name: String?) async {
+        await postBody(path: "/jsonl-aliases/rename",
+                        body: RenameJSONLRequest(path: path, name: name))
+        // Repo index refresh on the daemon side is fire-and-forget; the
+        // next sessions-list poll picks up the new customName.
+        await refreshSessions()
+    }
+
     // MARK: - T33 multi-pane terminal endpoints
 
     @MainActor

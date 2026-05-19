@@ -236,9 +236,13 @@ final class SessionsV2Tests: XCTestCase {
         // chat-subscribe WS op (Phase 2) gates on chatSubscribeMinimum.
         // Field name unchanged so v4 iOS clients keep working; only the
         // semantics of updateCounter shifted.
-        XCTAssertEqual(AgentControlWireVersion.current, 5)
+        // Bumped 5 → 6 on 2026-05-19 (Gemini provider): extends AgentKind
+        // with .gemini, ModelCatalog gains gemini array, /usage envelope
+        // ships dual-shape (legacy claude/codex + new usage dict).
+        XCTAssertEqual(AgentControlWireVersion.current, 6)
         XCTAssertEqual(AgentControlWireVersion.composeDraftMinimum, 4)
         XCTAssertEqual(AgentControlWireVersion.chatSubscribeMinimum, 5)
+        XCTAssertEqual(AgentControlWireVersion.geminiMinimum, 6)
     }
 
     // MARK: - Mid-session change requests

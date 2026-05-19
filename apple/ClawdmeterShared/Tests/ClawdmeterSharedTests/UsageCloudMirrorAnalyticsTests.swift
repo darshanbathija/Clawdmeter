@@ -48,8 +48,7 @@ final class UsageCloudMirrorAnalyticsTests: XCTestCase {
             byDay: [day: totals]
         )
         return UsageHistorySnapshot(
-            claude: provider,
-            codex: .empty,
+            byProvider: [.claude: provider, .codex: .empty],
             computedAt: Date(),
             sequenceNumber: 42,
             sessionCount: 1,

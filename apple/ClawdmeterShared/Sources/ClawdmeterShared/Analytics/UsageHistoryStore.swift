@@ -24,13 +24,33 @@ public final class UsageHistoryStore: ObservableObject {
     @Published public var providerFilter: ProviderFilter = .both
 
     public enum ProviderFilter: String, CaseIterable, Sendable {
-        case both, claude, codex
+        /// All providers visible (replaces `.both` for the N-provider world
+        /// per X3-C). `.both` retained for back-compat with persisted user
+        /// pref values; treated as a synonym for `.all`.
+        case all
+        case both
+        case claude
+        case codex
+        case gemini
 
         public var label: String {
             switch self {
-            case .both: return "Both"
-            case .claude: return "Claude"
-            case .codex: return "Codex"
+            case .all, .both: return "All"
+            case .claude:     return "Claude"
+            case .codex:      return "Codex"
+            case .gemini:     return "Gemini"
+            }
+        }
+
+        /// True when this filter includes the given provider in rendering.
+        /// `.all` and `.both` include everyone; per-provider filters
+        /// include only that provider.
+        public func includes(_ provider: UsageRecord.Provider) -> Bool {
+            switch self {
+            case .all, .both: return true
+            case .claude:     return provider == .claude
+            case .codex:      return provider == .codex
+            case .gemini:     return provider == .gemini
             }
         }
     }

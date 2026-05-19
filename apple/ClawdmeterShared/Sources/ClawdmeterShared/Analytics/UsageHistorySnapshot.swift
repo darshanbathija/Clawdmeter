@@ -11,6 +11,14 @@ import Foundation
 ///
 /// Plan A19: `computedAt` + `sequenceNumber` form the monotonic ordering
 /// tuple iCloud readers use to reject stale snapshots.
+///
+/// 2026-05-19 Gemini provider: storage refactored from hardcoded `claude`/
+/// `codex` properties to a provider-keyed `byProvider` dictionary so N>2
+/// providers slot in without churn. Compat computed getters (`claude`,
+/// `codex`, `gemini`) return `.empty` when the corresponding key is absent,
+/// preserving every existing call site. Codable round-trips through the
+/// dictionary form; unknown provider keys (from future-version snapshots
+/// written by newer clients) are dropped silently on decode.
 public struct UsageHistorySnapshot: Codable, Sendable, Equatable {
 
     public enum Window: String, CaseIterable, Codable, Sendable {
@@ -29,8 +37,10 @@ public struct UsageHistorySnapshot: Codable, Sendable, Equatable {
         }
     }
 
-    public let claude: ProviderTotals
-    public let codex: ProviderTotals
+    /// Provider-keyed totals. New entries materialize when a provider has
+    /// any activity within the loader's scan; absent providers are looked
+    /// up via the compat getters and return `.empty`.
+    public let byProvider: [UsageRecord.Provider: ProviderTotals]
     public let computedAt: Date
     public let sequenceNumber: UInt64
     public let sessionCount: Int
@@ -38,24 +48,30 @@ public struct UsageHistorySnapshot: Codable, Sendable, Equatable {
     public let unpricedModelTokens: [String: TokenTotals]
 
     public init(
-        claude: ProviderTotals,
-        codex: ProviderTotals,
+        byProvider: [UsageRecord.Provider: ProviderTotals],
         computedAt: Date,
         sequenceNumber: UInt64,
         sessionCount: Int,
         unpricedModelTokens: [String: TokenTotals]
     ) {
-        self.claude = claude
-        self.codex = codex
+        self.byProvider = byProvider
         self.computedAt = computedAt
         self.sequenceNumber = sequenceNumber
         self.sessionCount = sessionCount
         self.unpricedModelTokens = unpricedModelTokens
     }
 
+    // MARK: - Compat getters
+
+    /// Back-compat shim for call sites that used the old `claude` stored
+    /// property. Returns `.empty` when the provider isn't in the dict
+    /// (regression-tested by `UsageHistorySnapshotCompatGetterTests`).
+    public var claude: ProviderTotals { byProvider[.claude] ?? .empty }
+    public var codex: ProviderTotals  { byProvider[.codex]  ?? .empty }
+    public var gemini: ProviderTotals { byProvider[.gemini] ?? .empty }
+
     public static let empty = UsageHistorySnapshot(
-        claude: .empty,
-        codex: .empty,
+        byProvider: [:],
         computedAt: .distantPast,
         sequenceNumber: 0,
         sessionCount: 0,
@@ -63,10 +79,73 @@ public struct UsageHistorySnapshot: Codable, Sendable, Equatable {
     )
 
     public func totals(for provider: UsageRecord.Provider) -> ProviderTotals {
-        switch provider {
-        case .claude: return claude
-        case .codex: return codex
+        byProvider[provider] ?? .empty
+    }
+
+    // MARK: - Codable
+
+    /// Custom Codable round-trip. byProvider is encoded as a `[String:
+    /// ProviderTotals]` dict (string keys = provider rawValues) so old
+    /// snapshots that lack a provider key decode cleanly + new snapshots
+    /// with unknown keys (from future clients) drop unknowns silently.
+    /// Legacy snapshots written with the v8 schema (top-level `claude`
+    /// + `codex` fields, no byProvider) are migrated at decode by reading
+    /// those legacy fields and populating the dict.
+    private enum CodingKeys: String, CodingKey {
+        case byProvider
+        case computedAt
+        case sequenceNumber
+        case sessionCount
+        case unpricedModelTokens
+        // Legacy v8 fields, retained for backward-compat decode.
+        case claude
+        case codex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.computedAt = try c.decode(Date.self, forKey: .computedAt)
+        self.sequenceNumber = try c.decode(UInt64.self, forKey: .sequenceNumber)
+        self.sessionCount = try c.decode(Int.self, forKey: .sessionCount)
+        self.unpricedModelTokens = (try c.decodeIfPresent([String: TokenTotals].self, forKey: .unpricedModelTokens)) ?? [:]
+
+        // Prefer the new byProvider shape. Unknown provider raw values
+        // (future-client snapshots) are dropped silently.
+        if let dict = try c.decodeIfPresent([String: ProviderTotals].self, forKey: .byProvider) {
+            var out: [UsageRecord.Provider: ProviderTotals] = [:]
+            for (k, v) in dict {
+                if let p = UsageRecord.Provider(rawValue: k) { out[p] = v }
+            }
+            self.byProvider = out
+            return
         }
+
+        // Legacy v8 fallback: top-level claude/codex fields. Cold cache or
+        // pre-Gemini snapshot.
+        var legacy: [UsageRecord.Provider: ProviderTotals] = [:]
+        if let claude = try c.decodeIfPresent(ProviderTotals.self, forKey: .claude) {
+            legacy[.claude] = claude
+        }
+        if let codex = try c.decodeIfPresent(ProviderTotals.self, forKey: .codex) {
+            legacy[.codex] = codex
+        }
+        self.byProvider = legacy
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(computedAt, forKey: .computedAt)
+        try c.encode(sequenceNumber, forKey: .sequenceNumber)
+        try c.encode(sessionCount, forKey: .sessionCount)
+        try c.encode(unpricedModelTokens, forKey: .unpricedModelTokens)
+        // Write the new byProvider dict (canonical) AND the legacy
+        // claude/codex fields (for one release of overlap, so a v5 reader
+        // can still pick up totals from a v6 writer's snapshot).
+        var dict: [String: ProviderTotals] = [:]
+        for (k, v) in byProvider { dict[k.rawValue] = v }
+        try c.encode(dict, forKey: .byProvider)
+        if let claude = byProvider[.claude] { try c.encode(claude, forKey: .claude) }
+        if let codex = byProvider[.codex] { try c.encode(codex, forKey: .codex) }
     }
 }
 

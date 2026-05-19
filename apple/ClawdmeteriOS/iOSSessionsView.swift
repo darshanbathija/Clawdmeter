@@ -28,6 +28,12 @@ struct iOSSessionsView: View {
     @State private var renameTarget: AgentSession?
     @State private var renameInput: String = ""
     @State private var showingRenameAlert: Bool = false
+    /// v0.5.10 — parallel rename state for Recent JSONL rows. Keyed by
+    /// path on the daemon (not session id) because these rows aren't
+    /// Clawdmeter-owned sessions.
+    @State private var renameJSONLTarget: RecentSession?
+    @State private var renameJSONLInput: String = ""
+    @State private var showingRenameJSONLAlert: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -71,6 +77,42 @@ struct iOSSessionsView: View {
                 }
             } message: { target in
                 Text("Currently: \(target.customName?.isEmpty == false ? target.customName! : target.agent.rawValue.capitalized)")
+            }
+            // v0.5.10 — Recent JSONL row rename alert. Same canonical
+            // bool + presenting payload pattern as the session-rename
+            // alert above.
+            .alert(
+                "Rename session",
+                isPresented: $showingRenameJSONLAlert,
+                presenting: renameJSONLTarget
+            ) { target in
+                TextField("Name", text: $renameJSONLInput)
+                Button("Save") {
+                    let trimmed = renameJSONLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task { await client.renameJSONLAlias(path: target.path, name: trimmed.isEmpty ? nil : trimmed) }
+                    showingRenameJSONLAlert = false
+                    renameJSONLTarget = nil
+                    renameJSONLInput = ""
+                }
+                Button("Clear name", role: .destructive) {
+                    Task { await client.renameJSONLAlias(path: target.path, name: nil) }
+                    showingRenameJSONLAlert = false
+                    renameJSONLTarget = nil
+                    renameJSONLInput = ""
+                }
+                Button("Cancel", role: .cancel) {
+                    showingRenameJSONLAlert = false
+                    renameJSONLTarget = nil
+                    renameJSONLInput = ""
+                }
+            } message: { target in
+                let current = target.customName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let label: String = {
+                    if let c = current, !c.isEmpty { return c }
+                    if let p = target.firstPrompt, !p.isEmpty { return p }
+                    return target.provider == .claude ? "Claude session" : "Codex session"
+                }()
+                Text("Currently: \(label)")
             }
             .navigationTitle("Sessions")
             .navigationBarTitleDisplayMode(.inline)
@@ -325,7 +367,30 @@ struct iOSSessionsView: View {
                             recent: recent, repo: repo, client: client
                         )
                     } label: {
+                        // v0.5.10 — .contextMenu on the inner label (the
+                        // v0.5.7 fix learning: List + NavigationLink
+                        // swallows context menus attached to the outer
+                        // row). Long-press fires Rename.
                         RecentSessionRow(recent: recent)
+                            .contextMenu {
+                                Button {
+                                    renameJSONLTarget = recent
+                                    renameJSONLInput = recent.customName ?? ""
+                                    showingRenameJSONLAlert = true
+                                } label: {
+                                    Label("Rename…", systemImage: "pencil")
+                                }
+                            }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            renameJSONLTarget = recent
+                            renameJSONLInput = recent.customName ?? ""
+                            showingRenameJSONLAlert = true
+                        } label: {
+                            Label("Rename", systemImage: "pencil")
+                        }
+                        .tint(.blue)
                     }
                 }
             }
@@ -633,6 +698,25 @@ struct iOSSessionsView: View {
                 // chip — the date-grouped list has no repo section
                 // header to lean on.
                 RecentSessionRow(recent: recent, repo: repo)
+                    .contextMenu {
+                        Button {
+                            renameJSONLTarget = recent
+                            renameJSONLInput = recent.customName ?? ""
+                            showingRenameJSONLAlert = true
+                        } label: {
+                            Label("Rename…", systemImage: "pencil")
+                        }
+                    }
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button {
+                    renameJSONLTarget = recent
+                    renameJSONLInput = recent.customName ?? ""
+                    showingRenameJSONLAlert = true
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(.blue)
             }
         }
     }
@@ -760,6 +844,7 @@ private struct RecentSessionRow: View {
         switch recent.provider {
         case .claude: return Color(red: 217.0/255, green: 119.0/255, blue: 87.0/255).opacity(0.18)
         case .codex:  return Color.secondary.opacity(0.20)
+        case .gemini: return Color.blue.opacity(0.18)
         }
     }
 
@@ -767,6 +852,7 @@ private struct RecentSessionRow: View {
         switch recent.provider {
         case .claude: return Color(red: 217.0/255, green: 119.0/255, blue: 87.0/255)
         case .codex:  return .primary
+        case .gemini: return .blue
         }
     }
 
@@ -816,13 +902,18 @@ private struct RecentSessionRow: View {
     }
 
     private var providerLabel: String {
-        recent.provider == .claude ? "Claude" : "Codex"
+        switch recent.provider {
+        case .claude: return "Claude"
+        case .codex:  return "Codex"
+        case .gemini: return "Gemini"
+        }
     }
 
     private var providerLabelColor: Color {
         switch recent.provider {
         case .claude: return Color(red: 217.0/255, green: 119.0/255, blue: 87.0/255)
         case .codex:  return .primary
+        case .gemini: return .blue
         }
     }
 
@@ -833,6 +924,11 @@ private struct RecentSessionRow: View {
     }
 
     private var title: String {
+        // v0.5.10 — user-supplied alias wins.
+        if let custom = recent.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            return custom
+        }
         if let prompt = recent.firstPrompt, !prompt.isEmpty {
             return prompt
         }

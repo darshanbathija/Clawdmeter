@@ -1,11 +1,17 @@
 #if !os(watchOS)
 import SwiftUI
 
-/// The 5 × 3 totals grid shown on both Mac and iOS. Header row carries
-/// provider names; the four data rows are the time windows.
+/// The provider-keyed totals grid shown on both Mac and iOS. Iterates
+/// `snapshot.byProvider` so the column count tracks providers — 2 cells
+/// (Claude + Codex) pre-Gemini, 3 cells (Claude + Codex + Gemini) post-v6.
 ///
-/// Plan A5 + A16: $ is the primary cell text using adaptive precision;
-/// tokens appear as a `.secondary` sub-line in compact-name notation.
+/// **Cell renderer split** (Codex P0(3) / Section 2 nit): providers with
+/// per-request cost telemetry (Claude/Codex) render `$X.YZ` primary +
+/// `N tok` subscript. Providers without token-level telemetry (Gemini —
+/// cloudcode-pa quota endpoint exposes request counts but not tokens)
+/// render `N reqs` primary, NO subscript (do not emit "0 tok" — it's
+/// misleading). Empty cells (provider keyed but window has no activity)
+/// render nothing.
 @available(macOS 13, iOS 16, *)
 public struct AnalyticsTotalsGrid: View {
 
@@ -17,26 +23,27 @@ public struct AnalyticsTotalsGrid: View {
         self.isLoading = isLoading
     }
 
+    /// Providers to render, in display order. Claude first, Codex second,
+    /// then Gemini. Only includes providers that have a key in the
+    /// snapshot's `byProvider` dict (no zero-state empty columns for
+    /// providers the user never used). Falls back to the legacy 2-column
+    /// view when the snapshot is empty so first-launch users see a
+    /// familiar shape.
+    private var visibleProviders: [UsageRecord.Provider] {
+        let order: [UsageRecord.Provider] = [.claude, .codex, .gemini]
+        let active = order.filter { snapshot.byProvider[$0] != nil }
+        return active.isEmpty ? [.claude, .codex] : active
+    }
+
     public var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 14) {
-            // Header — provider logo + name, matching the Live tab's
-            // ClaudeSection / CodexSection treatment so users get the
-            // same visual anchor for "which column is which" across
-            // every screen that splits by provider.
+            // Header — provider logo + name per visible column.
             GridRow {
                 Text("")
-                providerHeader(
-                    name: "Claude",
-                    asset: "ClaudeLogo",
-                    isTemplate: false
-                )
-                .gridColumnAlignment(.trailing)
-                providerHeader(
-                    name: "Codex",
-                    asset: "CodexLogo",
-                    isTemplate: true
-                )
-                .gridColumnAlignment(.trailing)
+                ForEach(visibleProviders, id: \.self) { provider in
+                    providerHeader(provider)
+                        .gridColumnAlignment(.trailing)
+                }
             }
 
             ForEach(UsageHistorySnapshot.Window.allCases, id: \.self) { window in
@@ -45,43 +52,86 @@ public struct AnalyticsTotalsGrid: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.primary)
 
-                    cell(for: snapshot.claude.window(window))
-                        .gridColumnAlignment(.trailing)
-                    cell(for: snapshot.codex.window(window))
-                        .gridColumnAlignment(.trailing)
+                    ForEach(visibleProviders, id: \.self) { provider in
+                        cell(provider: provider, window: snapshot.totals(for: provider).window(window))
+                            .gridColumnAlignment(.trailing)
+                    }
                 }
             }
         }
     }
 
-    /// Header label: small logo on the left, provider name on the right.
-    /// Codex's silhouette is a flat black PNG on a transparent canvas, so
-    /// we mark it `.template` and let SwiftUI tint it with the surrounding
-    /// `.secondary` foreground style — otherwise it disappears on dark
-    /// backgrounds. Claude's burst keeps its full terra-cotta color.
+    /// Header label: small logo + provider name. Matches existing pattern.
     @ViewBuilder
-    private func providerHeader(name: String, asset: String, isTemplate: Bool) -> some View {
+    private func providerHeader(_ provider: UsageRecord.Provider) -> some View {
         HStack(spacing: 5) {
-            ProviderBadgeImage(assetName: asset, isTemplate: isTemplate, size: 14)
-            Text(name)
+            ProviderBadgeImage(
+                assetName: Self.logoAsset(for: provider),
+                isTemplate: Self.isTemplateAsset(for: provider),
+                size: 14
+            )
+            Text(Self.displayName(for: provider))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
         }
     }
 
+    /// Per-cell renderer. Picks cost vs request-count display by which
+    /// metric is non-zero. Providers with both ($ and reqs) prefer cost.
     @ViewBuilder
-    private func cell(for window: WindowTotals) -> some View {
+    private func cell(provider: UsageRecord.Provider, window: WindowTotals) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
-            Text(AnalyticsCurrencyFormatter.format(window.totals.costUSD))
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.primary)
-                .monospacedDigit()
-                .redacted(reason: isLoading ? .placeholder : [])
-            Text(AnalyticsTokenFormatter.format(window.totals.totalTokens) + " tok")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .redacted(reason: isLoading ? .placeholder : [])
+            if window.totals.costUSD > 0 {
+                Text(AnalyticsCurrencyFormatter.format(window.totals.costUSD))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .redacted(reason: isLoading ? .placeholder : [])
+                Text(AnalyticsTokenFormatter.format(window.totals.totalTokens) + " tok")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .redacted(reason: isLoading ? .placeholder : [])
+            } else if window.totals.requestCount > 0 {
+                // Gemini: per-request count, no token subscript.
+                Text("\(window.totals.requestCount) reqs")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .redacted(reason: isLoading ? .placeholder : [])
+            } else {
+                Text("—")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    // MARK: - Provider metadata helpers
+
+    private static func displayName(for provider: UsageRecord.Provider) -> String {
+        switch provider {
+        case .claude: return "Claude"
+        case .codex:  return "Codex"
+        case .gemini: return "Gemini"
+        }
+    }
+
+    private static func logoAsset(for provider: UsageRecord.Provider) -> String {
+        switch provider {
+        case .claude: return "ClaudeLogo"
+        case .codex:  return "CodexLogo"
+        case .gemini: return "GeminiLogo"
+        }
+    }
+
+    private static func isTemplateAsset(for provider: UsageRecord.Provider) -> Bool {
+        // Both Codex (silhouette) and Gemini (G mark) are template assets;
+        // Claude (terra-cotta burst) keeps its color.
+        switch provider {
+        case .claude: return false
+        case .codex:  return true
+        case .gemini: return true
         }
     }
 }

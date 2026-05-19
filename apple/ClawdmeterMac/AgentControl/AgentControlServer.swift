@@ -742,6 +742,9 @@ public final class AgentControlServer {
         t.register(method: "POST", pattern: "/sessions/:id/rename") { [weak self] req, conn, params in
             self?.handleRename(sessionId: params["id"] ?? "", request: req, connection: conn)
         }
+        t.register(method: "POST", pattern: "/jsonl-aliases/rename") { [weak self] req, conn, _ in
+            self?.handleRenameJSONLAlias(request: req, connection: conn)
+        }
         t.register(method: "POST", pattern: "/sessions/:id/model") { [weak self] req, conn, params in
             await self?.handleChangeModel(sessionId: params["id"] ?? "", request: req, connection: conn)
         }
@@ -997,6 +1000,11 @@ public final class AgentControlServer {
                 autopilot: false,
                 resumeSessionId: cliSessionId
             ) ?? []
+        case .gemini:
+            // No interactive Gemini CLI yet — fall through to the
+            // missing-binary surface so the request returns a 4xx
+            // instead of silently spawning an empty process.
+            argv = []
         }
         guard !argv.isEmpty else {
             sendResponse(HTTPResponse(
@@ -2005,6 +2013,10 @@ public final class AgentControlServer {
                 effort: session.effort,
                 autopilot: false
             )
+        case .gemini:
+            // approve-plan from Gemini is unsupported in v6 — there's no
+            // gemini CLI to respawn. Surfaces as 500 below.
+            argv = nil
         }
         guard let replacementArgv = argv else {
             serverLogger.error("approve-plan: missing CLI binary for \(session.agent.rawValue, privacy: .public)")
@@ -2105,6 +2117,46 @@ public final class AgentControlServer {
             return
         }
         registry.rename(id: uuid, name: body.name)
+        sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
+    }
+
+    /// v0.5.10 — `POST /jsonl-aliases/rename` with body `{path, name}`.
+    /// Rename a Recent JSONL row (not a Clawdmeter-owned session). Persists
+    /// to `~/.clawdmeter/jsonl-aliases.json` keyed by path. Empty/whitespace
+    /// `name` clears the alias.
+    private func handleRenameJSONLAlias(
+        request: HTTPRequest,
+        connection: NWConnection
+    ) {
+        let decoder = JSONDecoder()
+        guard let body = try? decoder.decode(RenameJSONLRequest.self, from: request.body) else {
+            sendResponse(.badRequest, on: connection)
+            return
+        }
+        // Match the session-rename cap so a malicious paired peer can't
+        // wedge a multi-MB string into the on-disk store.
+        if let n = body.name, n.count > 200 {
+            sendResponse(.badRequest, on: connection)
+            return
+        }
+        // Belt-and-braces: insist the path is absolute and lives under one
+        // of the two well-known JSONL roots. Prevents a paired peer from
+        // wedging arbitrary keys into the alias file.
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let allowedRoots = [
+            home + "/.claude/projects/",
+            home + "/.codex/sessions/"
+        ]
+        guard body.path.hasPrefix("/"),
+              allowedRoots.contains(where: { body.path.hasPrefix($0) })
+        else {
+            sendResponse(.badRequest, on: connection)
+            return
+        }
+        JSONLAliasStore.shared.setAlias(path: body.path, name: body.name)
+        // Refresh the RepoIndex snapshot so the new name shows in the
+        // sidebar without waiting for the 60s tick.
+        Task { [repoIndex] in await repoIndex.refresh() }
         sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
     }
 

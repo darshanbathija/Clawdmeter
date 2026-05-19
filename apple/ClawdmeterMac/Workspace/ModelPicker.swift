@@ -77,6 +77,7 @@ struct ModelPicker: View {
         switch agent {
         case .claude: return catalog.claude
         case .codex:  return catalog.codex
+        case .gemini: return catalog.gemini
         }
     }
 

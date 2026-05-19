@@ -4,6 +4,24 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.5.10 build 43] - 2026-05-19
+
+### Fixed
+
+- **Recent JSONL rows can now actually be renamed too.** v0.5.4 / v0.5.9 wired rename for registered AgentSessions (the rows under the live session list), but the "Recent (last 30 days)" rows in the sidebar use a different renderer — `recentSessionRow` on Mac, `RecentSessionRow` on iOS — and weren't wired up at all. Right-clicking "Rename…" on the `/office-hours` row (or any other Recent JSONL row) silently no-op'd. Surfaced when the user followed up "still not working" after v0.5.9 shipped, with a screenshot of a Recent row. Rename for Recent JSONL rows is now first-class on both platforms.
+  - **New `JSONLAliasStore` daemon-side** (`apple/ClawdmeterMac/AgentControl/JSONLAliasStore.swift`) — thread-safe (`NSLock`) Mac-side store keyed by the JSONL's absolute path, persisted to `~/.clawdmeter/jsonl-aliases.json` with atomic write. Survives app restarts; survives `RepoIndex` rebuilds. Singleton (`JSONLAliasStore.shared`); not actor-bound so the actor-owned `RepoIndex` and the `@MainActor` HTTP handlers both call it without isolation hops.
+  - **`RecentSession` gains `customName: String?`** (`apple/ClawdmeterShared/.../Protocol.swift`) — decoder-tolerant (`decodeIfPresent`) so older iOS clients reading a newer Mac's response degrade cleanly. `RepoIndex.buildSnapshot` snapshots the alias store once per refresh and folds matching aliases into both the Claude (`~/.claude/projects/`) and Codex (`~/.codex/sessions/`) construction sites.
+  - **New `POST /jsonl-aliases/rename` daemon endpoint** with body `{path, name}`. Path is validated to start with `/` and live under one of the two known JSONL roots so a paired-but-malicious peer can't wedge arbitrary keys into the alias file. 200-char cap on `name` matches the session-rename cap. Handler kicks a `RepoIndex.refresh()` after the write so the new name surfaces in the sidebar without waiting for the 60s tick.
+  - **New iOS client method `AgentControlClient.renameJSONLAlias(path:name:)`** posts to the new endpoint and refreshes the sessions list.
+  - **Mac UI surfaces `customName` in `recentTitle(_)`** with the alias winning over `firstPrompt`. `recentSessionRow` gains a right-click "Rename…" context-menu action that uses the canonical `@State Bool` + `presenting:` payload alert pattern (same fix as the v0.5.9 AgentSession rename). Writes directly to `JSONLAliasStore.shared` — no HTTP loopback needed since the Mac is the daemon.
+  - **iOS `RecentSessionRow.title`** also prefers `customName`. Both call sites (the repo-grouped list at `iOSSessionsView.swift:328` and the by-date list at `iOSSessionsView.swift:635`) gain a `.contextMenu` on the inner label (the v0.5.7 fix learning — iOS 17 List swallows context menus attached to the outer NavigationLink) plus a leading swipe action labeled "Rename" for discoverability. Shared parallel `renameJSONLTarget` / `renameJSONLInput` / `showingRenameJSONLAlert` state mirrors the session-rename plumbing.
+
+### Also lands in this build
+
+- **Wire version 4 → 6 — Gemini provider scaffolding.** `AgentKind` extends with `.gemini`, `ModelCatalog` gains a `gemini` array, `/usage` envelope ships dual-shape (legacy `claude/codex` + a new `usage` dict) with per-provider fallback so v6 readers prefer `usage[id]` and fall back to legacy independently per provider (X1 fix — prevents data loss when the dict is partial). `geminiMinimum = 6` gates iOS UI on the new schema. New `GeminiUsageParser` / `GeminiSource` / `GeminiTokenProvider` files surface analytics totals; the chart + totals views gain Gemini's blue accent alongside terra-cotta + slate. There is no `gemini` CLI to spawn yet, so the spawner / approve-plan paths route `.gemini` to the missing-binary surface gracefully.
+- **Mac, iOS, Watch schemes build clean** after closing the switch-exhaustiveness gaps the partial Gemini refactor left behind (`AgentControlServer.handleContinueReadOnly` / `handleApprovePlan`, `SessionsView.spawnSession` / `continueOutsideSession` / new-session sheet, `SessionActivityStrip.indicator`, `Workspace/ModelPicker.modelsForAgent`, `Composer/CommandPalette.filter`, `AgentSpawner.argv(for:)` / `respawnArgv`, iOS `RecentSessionRow.badgeBackground`/`badgeForeground`/`providerLabel`/`providerLabelColor`).
+- **Two pre-existing test failures fixed too**: `UsageCloudMirrorAnalyticsTests` was constructing `UsageHistorySnapshot` with the v5 `claude:/codex:` init that the Gemini refactor replaced with `byProvider: [.claude: ..., .codex: ...]`. `UsageHistoryTests.test_loaderEmptyDirsReturnsZero` was hitting the user's real `~/.gemini/tmp/` because `geminiDir` default-points there; the test now passes a temp-dir override. 276/276 green.
+
 ## [0.5.9 build 42] - 2026-05-19
 
 ### Fixed

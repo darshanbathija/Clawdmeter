@@ -283,6 +283,12 @@ private struct SidebarPane: View {
     @State private var renameTarget: AgentSession?
     @State private var renameInput: String = ""
     @State private var showingRenameAlert: Bool = false
+    // v0.5.10 — parallel state for Recent JSONL row rename. Keyed by path
+    // (not session id) because these rows aren't Clawdmeter-owned
+    // sessions; they're files we surface.
+    @State private var renameJSONLTarget: RecentSession?
+    @State private var renameJSONLInput: String = ""
+    @State private var showingRenameJSONLAlert: Bool = false
 
     private var grouping: SessionGrouping {
         SessionGrouping(rawValue: groupingRaw) ?? .repo
@@ -335,6 +341,36 @@ private struct SidebarPane: View {
             }
         } message: { target in
             Text("Currently: \(target.displayLabel)")
+        }
+        // v0.5.10 — Recent JSONL row rename alert. Same canonical Bool
+        // + presenting payload pattern as the session-rename alert.
+        .alert(
+            "Rename session",
+            isPresented: $showingRenameJSONLAlert,
+            presenting: renameJSONLTarget
+        ) { target in
+            TextField("Name", text: $renameJSONLInput)
+                .textFieldStyle(.roundedBorder)
+            Button("Save") {
+                let trimmed = renameJSONLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                model.renameJSONLAlias(path: target.path, name: trimmed.isEmpty ? nil : trimmed)
+                showingRenameJSONLAlert = false
+                renameJSONLTarget = nil
+                renameJSONLInput = ""
+            }
+            Button("Clear name", role: .destructive) {
+                model.renameJSONLAlias(path: target.path, name: nil)
+                showingRenameJSONLAlert = false
+                renameJSONLTarget = nil
+                renameJSONLInput = ""
+            }
+            Button("Cancel", role: .cancel) {
+                showingRenameJSONLAlert = false
+                renameJSONLTarget = nil
+                renameJSONLInput = ""
+            }
+        } message: { target in
+            Text("Currently: \(recentTitle(target))")
         }
     }
 
@@ -638,6 +674,11 @@ private struct SidebarPane: View {
             Button("Continue here", systemImage: "play.fill") {
                 Task { _ = await model.continueOutsideSession(recent: recent, repoKey: repo.key, repoDisplayName: repo.displayName) }
             }
+            Button("Rename…", systemImage: "pencil") {
+                renameJSONLTarget = recent
+                renameJSONLInput = recent.customName ?? ""
+                showingRenameJSONLAlert = true
+            }
         }
     }
 
@@ -714,6 +755,11 @@ private struct SidebarPane: View {
     }
 
     private func recentTitle(_ recent: RecentSession) -> String {
+        // v0.5.10 — user-supplied alias wins. Always.
+        if let custom = recent.customName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !custom.isEmpty {
+            return custom
+        }
         // Prefer the first user prompt — that's what the session was for.
         // Fall back to the generic label when we couldn't extract one
         // (empty JSONL, unparseable, all system meta).

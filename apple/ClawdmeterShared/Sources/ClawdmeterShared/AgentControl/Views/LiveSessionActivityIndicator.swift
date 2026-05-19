@@ -96,6 +96,10 @@ public struct LiveSessionActivityIndicator: View {
         case .codex:
             // Codex blue — same #5C9DFF used in SessionsV2Theme.codexBlue.
             return Color(red: 0x5C / 255.0, green: 0x9D / 255.0, blue: 0xFF / 255.0)
+        case .gemini:
+            // Google blue — Antigravity / Gemini CLI's brand accent.
+            // Used by the Gemini gauge, chat bubble + Live Activity indicator.
+            return Color(red: 0x42 / 255.0, green: 0x85 / 255.0, blue: 0xF4 / 255.0)
         }
     }
 
@@ -106,6 +110,11 @@ public struct LiveSessionActivityIndicator: View {
             ClaudeAsteriskSpinner(color: accent, size: 14)
         case .codex:
             CodexPulseSpinner(color: accent, size: 14)
+        case .gemini:
+            // Reuse Claude's asterisk spinner — Gemini's brand mark is a
+            // 4-pointed star which closely resembles the asterisk. Distinct
+            // accent color keeps providers visually separable.
+            ClaudeAsteriskSpinner(color: accent, size: 14)
         }
     }
 

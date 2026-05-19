@@ -30,12 +30,19 @@ public struct AnalyticsRepoList: View {
     private var rows: [Row] {
         var claudeByRepo: [RepoKey: TokenTotals] = [:]
         var codexByRepo: [RepoKey: TokenTotals] = [:]
-        if providerFilter != .codex {
+        // Per-provider include checks via the new .includes(_:) helper.
+        // Gemini's costUSD is always 0 (cloudcode-pa doesn't expose tokens)
+        // so even when .includes(.gemini) is true, Gemini contributes
+        // nothing to this cost-ranked list. Gemini per-repo request counts
+        // are surfaced separately in the Requests chart panel; promoting
+        // them into this list is a v0.7 follow-up (TODOS.md X3-C trunk
+        // refactor item).
+        if providerFilter.includes(.claude) {
             for row in snapshot.claude.window(window).byRepo where row.repo != "__rest__" {
                 claudeByRepo[row.repo, default: .zero] += row.totals
             }
         }
-        if providerFilter != .claude {
+        if providerFilter.includes(.codex) {
             for row in snapshot.codex.window(window).byRepo where row.repo != "__rest__" {
                 codexByRepo[row.repo, default: .zero] += row.totals
             }

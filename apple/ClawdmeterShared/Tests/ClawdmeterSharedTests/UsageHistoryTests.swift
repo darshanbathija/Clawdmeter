@@ -368,11 +368,14 @@ final class UsageHistoryTests: XCTestCase {
         let codexDir = temp.appendingPathComponent("codex")
         try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: codexDir, withIntermediateDirectories: true)
+        let geminiDir = temp.appendingPathComponent("gemini")
+        try FileManager.default.createDirectory(at: geminiDir, withIntermediateDirectories: true)
         let cacheURL = temp.appendingPathComponent("cache.json")
 
         let loader = UsageHistoryLoader(
             claudeDir: claudeDir,
             codexDir: codexDir,
+            geminiDir: geminiDir,
             cacheURL: cacheURL
         )
         let snapshot = await loader.loadAll()

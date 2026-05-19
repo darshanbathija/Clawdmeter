@@ -16,9 +16,10 @@ import Foundation
 /// resume.
 public struct UsageRecord: Sendable, Equatable {
 
-    public enum Provider: String, Codable, Sendable, Equatable {
+    public enum Provider: String, Codable, Sendable, Equatable, CaseIterable {
         case claude
         case codex
+        case gemini
     }
 
     public let provider: Provider

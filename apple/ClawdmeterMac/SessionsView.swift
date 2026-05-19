@@ -123,6 +123,7 @@ struct NewSessionMacSheet: View {
         switch agent {
         case .claude: modelDefault = defaults.modelId
         case .codex:  modelDefault = ModelCatalog.bundled.codex.first?.id
+        case .gemini: modelDefault = ModelCatalog.bundled.gemini.first?.id
         }
         do {
             _ = try await model.spawnSession(
@@ -551,6 +552,10 @@ public final class SessionsModel: ObservableObject {
                 acceptEdits: acceptEdits,
                 resumeSessionId: resumeSessionId
             ) ?? []
+        case .gemini:
+            // Gemini doesn't have an interactive CLI today — falls
+            // through to the missing-binary error surface.
+            argv = []
         }
         guard !argv.isEmpty else {
             throw SpawnError.missingBinary("Agent CLI not found on PATH: \(agent.rawValue). Configure in Settings -> Diagnostics.")
@@ -606,6 +611,7 @@ public final class SessionsModel: ObservableObject {
         switch synthetic.agent {
         case .claude: modelDefault = defaults.modelId
         case .codex:  modelDefault = ModelCatalog.bundled.codex.first?.id
+        case .gemini: modelDefault = ModelCatalog.bundled.gemini.first?.id
         }
         do {
             let session = try await spawnSession(
@@ -630,6 +636,15 @@ public final class SessionsModel: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    /// v0.5.10: set or clear a custom display name for a Recent JSONL row.
+    /// Writes directly to the in-process alias store (no HTTP loopback
+    /// needed on the Mac side), then asks `RepoIndex` to rebuild so the
+    /// sidebar reflects the new name without waiting for the 60s tick.
+    public func renameJSONLAlias(path: String, name: String?) {
+        JSONLAliasStore.shared.setAlias(path: path, name: name)
+        Task { [repoIndex] in await repoIndex.refresh() }
     }
 
     /// Wave A: turn a read-only Recent JSONL row into a live continuable

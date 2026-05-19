@@ -20,6 +20,7 @@ public actor UsageHistoryLoader {
     private let logger = Logger(subsystem: "com.clawdmeter.shared", category: "Analytics")
     private let claudeDir: URL
     private let codexDir: URL
+    private let geminiDir: URL
     private let cacheURL: URL?
     private let pricing: Pricing
 
@@ -29,12 +30,16 @@ public actor UsageHistoryLoader {
     public init(
         claudeDir: URL? = nil,
         codexDir: URL? = nil,
+        geminiDir: URL? = nil,
         cacheURL: URL? = nil,
         pricing: Pricing = .shared
     ) {
         let home = URL(fileURLWithPath: NSHomeDirectory())
         self.claudeDir = claudeDir ?? home.appendingPathComponent(".claude/projects", isDirectory: true)
         self.codexDir = codexDir ?? home.appendingPathComponent(".codex/sessions", isDirectory: true)
+        // Gemini CLI writes per-repo logs under `~/.gemini/tmp/<repo>/logs.json`.
+        // `GeminiUsageParser` walks this tree; missing dir is a no-op.
+        self.geminiDir = geminiDir ?? home.appendingPathComponent(".gemini/tmp", isDirectory: true)
         self.cacheURL = cacheURL ?? Self.defaultCacheURL()
         self.pricing = pricing
     }
@@ -81,10 +86,12 @@ public actor UsageHistoryLoader {
 
         let claudeFiles = enumerate(dir: claudeDir, suffix: ".jsonl")
         let codexFiles = enumerate(dir: codexDir, suffix: ".jsonl")
+        let geminiFiles = enumerate(dir: geminiDir, suffix: "logs.json")
 
         // Identify active (newest mtime) per dir — those bypass cache.
         let claudeActive = claudeFiles.max(by: { $0.mtime < $1.mtime })?.url
         let codexActive = codexFiles.max(by: { $0.mtime < $1.mtime })?.url
+        let geminiActive = geminiFiles.max(by: { $0.mtime < $1.mtime })?.url
 
         let claudeResults = await parseConcurrently(
             files: claudeFiles,
@@ -104,11 +111,27 @@ public actor UsageHistoryLoader {
             }
         )
 
+        let geminiResults = await parseConcurrently(
+            files: geminiFiles,
+            cache: cache,
+            activeURL: geminiActive,
+            parser: { url in
+                try Self.parseGeminiFile(at: url)
+            }
+        )
+
         // Merge all per-file results, applying global cross-file dedup. Per
         // plan A9: the per-file `dedupKeys` set is unioned into a global Set
         // so duplicates that span files are caught even on cache hits.
         var claudeDayByRepo: [Date: [RepoKey: TokenTotals]] = [:]
         var codexDayByRepo: [Date: [RepoKey: TokenTotals]] = [:]
+        // Gemini per-day-per-repo bucket — populated by GeminiUsageParser
+        // walking `~/.gemini/tmp/<repo>/logs.json`. The cloudcode-pa quota
+        // endpoint doesn't expose per-request tokens; UsageRecord carries
+        // `tokens.requestCount = 1` with `costUSD = 0` per Gemini record
+        // (the analytics schema split — see plan §Analytics schema split).
+        // Optional so a missing parser pass writes an empty `.gemini` slot.
+        var geminiDayByRepo: [Date: [RepoKey: TokenTotals]]? = nil
         var seenDedupKeys = Set<String>()
         var unpricedModelTokens: [String: TokenTotals] = [:]
         var sessionCount = 0
@@ -133,18 +156,37 @@ public actor UsageHistoryLoader {
             sessionCount += 1
             nextCache.files[result.path] = result.cacheEntry
         }
+        if !geminiResults.isEmpty {
+            geminiDayByRepo = [:]
+            for result in geminiResults {
+                mergePerFileResult(
+                    result,
+                    into: &geminiDayByRepo!,
+                    dedup: &seenDedupKeys,
+                    unpriced: &unpricedModelTokens
+                )
+                sessionCount += 1
+                nextCache.files[result.path] = result.cacheEntry
+            }
+        }
 
         writeCache(nextCache)
 
-        // Build per-provider windows.
+        // Build per-provider windows. byProvider dict slot lands here per
+        // 2026-05-19 Gemini-provider refactor; the Gemini parsing pass is
+        // wired through `geminiDayByRepo` below once `GeminiUsageParser`
+        // lands. Until then, Gemini analytics surfaces as `.empty`.
         let now = Date()
-        let claudeTotals = buildProviderTotals(from: claudeDayByRepo, now: now)
-        let codexTotals = buildProviderTotals(from: codexDayByRepo, now: now)
+        var byProvider: [UsageRecord.Provider: ProviderTotals] = [:]
+        byProvider[.claude] = buildProviderTotals(from: claudeDayByRepo, now: now)
+        byProvider[.codex] = buildProviderTotals(from: codexDayByRepo, now: now)
+        if let geminiDayByRepo, !geminiDayByRepo.isEmpty {
+            byProvider[.gemini] = buildProviderTotals(from: geminiDayByRepo, now: now)
+        }
 
         sequenceCounter += 1
         let snapshot = UsageHistorySnapshot(
-            claude: claudeTotals,
-            codex: codexTotals,
+            byProvider: byProvider,
             computedAt: Date(),
             sequenceNumber: sequenceCounter,
             sessionCount: sessionCount,
@@ -291,6 +333,35 @@ public actor UsageHistoryLoader {
 
     private nonisolated static func parseCodexFile(at url: URL) throws -> PerFileResult {
         let records = try CodexUsageParser.parse(file: url)
+        var byDayByRepo: [Date: [RepoKey: TokenTotals]] = [:]
+        var dedupKeys = Set<String>()
+        var unpriced: [String: TokenTotals] = [:]
+        for record in records {
+            accumulate(record: record, into: &byDayByRepo, dedup: &dedupKeys, unpriced: &unpriced)
+        }
+
+        let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let entry = AnalyticsCache.FileEntry(
+            mtime: values.contentModificationDate?.timeIntervalSince1970 ?? 0,
+            size: values.fileSize ?? 0,
+            byDayByRepo: AnalyticsCache.FileEntry.encode(byDayByRepo),
+            dedupKeys: Array(dedupKeys),
+            unpricedModelTokens: unpriced
+        )
+
+        return PerFileResult(
+            path: url.path,
+            byDayByRepo: byDayByRepo,
+            dedupKeys: dedupKeys,
+            unpricedModelTokens: unpriced,
+            cacheEntry: entry
+        )
+    }
+
+    private nonisolated static func parseGeminiFile(at url: URL) throws -> PerFileResult {
+        // Gemini's logs.json is a JSON array, not a JSONL stream — different
+        // shape from Claude/Codex but same target output (PerFileResult).
+        let records = try GeminiUsageParser.parse(file: url)
         var byDayByRepo: [Date: [RepoKey: TokenTotals]] = [:]
         var dedupKeys = Set<String>()
         var unpriced: [String: TokenTotals] = [:]
@@ -506,7 +577,13 @@ struct AnalyticsCache: Codable, Sendable {
     // `/Users/x` or `~/.paperclip/instances/<env>/workspaces/<UUID>` (with
     // no findable `.git`) showed up as their own rows, polluting the
     // by-repo list. Old v7 caches re-parse on first load.
-    static let currentVersion: Int = 8
+    // v9 (2026-05-19): UsageHistorySnapshot now stores `byProvider` dict
+    // instead of hardcoded `claude`/`codex` fields; TokenTotals gains
+    // `requestCount` for Gemini's quota-only telemetry. Custom Codable
+    // in both types handles missing-field decode for older snapshots, but
+    // the v9 bump forces a cold reparse so the on-disk cache shape stays
+    // consistent with the in-memory shape after upgrade.
+    static let currentVersion: Int = 9
 
     let version: Int
     var files: [String: FileEntry]

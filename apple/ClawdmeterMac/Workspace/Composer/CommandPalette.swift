@@ -94,6 +94,10 @@ final class SkillCatalog: ObservableObject {
         switch agent {
         case .claude: pool = commands.filter { $0.source != .codexBuiltin }
         case .codex:  pool = commands.filter { $0.source == .codexBuiltin }
+        case .gemini:
+            // No Gemini-specific palette yet — reuse Codex's built-in
+            // slash commands so the chip shows something useful.
+            pool = commands.filter { $0.source == .codexBuiltin }
         }
         if trimmed.isEmpty { return pool }
         return pool.filter {

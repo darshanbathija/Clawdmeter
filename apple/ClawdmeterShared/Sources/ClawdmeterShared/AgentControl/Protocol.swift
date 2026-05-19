@@ -30,7 +30,13 @@ public enum AgentControlWireVersion {
     /// status counter). The field name and shape are unchanged; only the
     /// semantics shift, so v4 iOS clients keep working. Phase 0a also
     /// introduces the `chat-subscribe` WS op (lands in Phase 2).
-    public static let current: Int = 5
+    /// v6 (2026-05-19) Gemini provider: extends `AgentKind` with `.gemini`;
+    /// `ModelCatalog` gains `gemini` array; `/usage` envelope ships in
+    /// dual-shape (legacy `{claude, codex}` + new `usage: [String: UsageData]`
+    /// dict) with PER-PROVIDER fallback in v6 readers (X1 fix: prefer
+    /// `usage[id]`, fall back to legacy `<id>` for each provider
+    /// independently — prevents data-loss when dict is partial).
+    public static let current: Int = 6
     /// Minimum wire version that supports the `compose-draft` WS op.
     /// iOS guards `postComposeDraft` on this — older Macs would reject
     /// the unknown op via `.unsupportedData` close (review §10 finding).
@@ -40,6 +46,11 @@ public enum AgentControlWireVersion {
     /// polling). iOS guards WS subscribe on this — older Macs stay on
     /// the `/chat-snapshot` HTTP polling path.
     public static let chatSubscribeMinimum: Int = 5
+    /// Minimum wire version that exposes `AgentKind.gemini` + the
+    /// `usage` dict shape on `/usage`. iOS hides Gemini UI when
+    /// `serverWireVersion < this` and surfaces an "Update Clawdmeter on
+    /// Mac" banner instead of dropping into a confused state.
+    public static let geminiMinimum: Int = 6
 }
 
 /// `GET /health` response. Old clients tolerate the extra fields; new
@@ -204,17 +215,25 @@ public struct ModelCatalogEntry: Codable, Hashable, Sendable, Identifiable {
 public struct ModelCatalog: Codable, Sendable {
     public let claude: [ModelCatalogEntry]
     public let codex: [ModelCatalogEntry]
+    /// Gemini Code Assist models. Empty on v5 wire (decoder fallback below
+    /// supplies `[]`); populated on v6+. Models reflect what Antigravity's
+    /// `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`
+    /// surfaces — 3-flavor split between Pro/Flash/Flash-Lite.
+    public let gemini: [ModelCatalogEntry]
     public let updatedAt: Date
 
-    public init(claude: [ModelCatalogEntry], codex: [ModelCatalogEntry], updatedAt: Date) {
+    public init(claude: [ModelCatalogEntry], codex: [ModelCatalogEntry], gemini: [ModelCatalogEntry] = [], updatedAt: Date) {
         self.claude = claude
         self.codex = codex
+        self.gemini = gemini
         self.updatedAt = updatedAt
     }
 
     /// Bundled default catalog. Mirrors the user's Conductor screenshot:
     /// Opus 4.7 / Opus 4.7 1M / Opus 4.6 1M / Sonnet 4.6 / Haiku 4.5 +
     /// GPT-5.5 / GPT-5.4 / GPT-5.3-Codex-Spark / GPT-5.3-Codex / GPT-5.2-Codex.
+    /// Gemini entries reflect Antigravity's 2026-05-19 v1internal:fetchAvailableModels
+    /// response (Gemini 3.1 Pro High/Low + Gemini 3 Flash).
     public static let bundled = ModelCatalog(
         claude: [
             ModelCatalogEntry(id: "claude-opus-4-7-1m",        provider: .claude, displayName: "Opus 4.7 (1M)",   cliAlias: nil,      supportsThinking: true,  supportsEffort: true,  contextWindow: 1_000_000, recommendedFor: "Long tasks",     badge: "1M"),
@@ -230,13 +249,45 @@ public struct ModelCatalog: Codable, Sendable {
             ModelCatalogEntry(id: "gpt-5.3-codex",       provider: .codex, displayName: "GPT-5.3 Codex",        cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: nil,              badge: nil),
             ModelCatalogEntry(id: "gpt-5.2-codex",       provider: .codex, displayName: "GPT-5.2 Codex",        cliAlias: nil, supportsThinking: false, supportsEffort: true, contextWindow: nil, recommendedFor: nil,              badge: nil),
         ],
+        gemini: [
+            ModelCatalogEntry(id: "gemini-3.1-pro-high",  provider: .gemini, displayName: "Gemini 3.1 Pro (High)", cliAlias: "pro-high",  supportsThinking: true,  supportsEffort: false, contextWindow: 1_000_000, recommendedFor: "Deep reasoning", badge: "High"),
+            ModelCatalogEntry(id: "gemini-3.1-pro-low",   provider: .gemini, displayName: "Gemini 3.1 Pro (Low)",  cliAlias: "pro",       supportsThinking: false, supportsEffort: false, contextWindow: 1_000_000, recommendedFor: "Most work",      badge: nil),
+            ModelCatalogEntry(id: "gemini-3-flash",       provider: .gemini, displayName: "Gemini 3 Flash",        cliAlias: "flash",     supportsThinking: false, supportsEffort: false, contextWindow: 1_000_000, recommendedFor: "Fast iteration", badge: "Fast"),
+        ],
         updatedAt: Date(timeIntervalSince1970: 1747353600) // 2026-05-15
     )
 
-    /// Resolve a model id to a catalog entry across both providers.
+    /// Resolve a model id to a catalog entry across all providers.
     public func entry(forId id: String) -> ModelCatalogEntry? {
         claude.first(where: { $0.id == id || $0.cliAlias == id })
             ?? codex.first(where: { $0.id == id || $0.cliAlias == id })
+            ?? gemini.first(where: { $0.id == id || $0.cliAlias == id })
+    }
+
+    // MARK: - Codable
+
+    /// Custom decoder so v5 payloads (no `gemini` field) decode cleanly.
+    /// Mirror of TokenTotals' X2 fix at the catalog level — synthesized
+    /// Codable throws on missing keys; decodeIfPresent + default returns
+    /// an empty Gemini array.
+    private enum CodingKeys: String, CodingKey {
+        case claude, codex, gemini, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.claude = try c.decode([ModelCatalogEntry].self, forKey: .claude)
+        self.codex = try c.decode([ModelCatalogEntry].self, forKey: .codex)
+        self.gemini = try c.decodeIfPresent([ModelCatalogEntry].self, forKey: .gemini) ?? []
+        self.updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(claude, forKey: .claude)
+        try c.encode(codex, forKey: .codex)
+        try c.encode(gemini, forKey: .gemini)
+        try c.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -258,18 +309,24 @@ public struct RecentSession: Codable, Hashable, Sendable, Identifiable {
     /// instead of "Claude session" five times in a row. Optional —
     /// empty / parse-failed JSONLs fall back to the generic label.
     public let firstPrompt: String?
+    /// User-supplied memorable name. When non-empty wins over `firstPrompt`
+    /// as the sidebar row title. Persisted on the Mac in
+    /// `~/.clawdmeter/jsonl-aliases.json` keyed by `path`.
+    public let customName: String?
     public var id: String { path }
 
     public init(
         path: String,
         lastModified: Date,
         provider: AgentKind,
-        firstPrompt: String? = nil
+        firstPrompt: String? = nil,
+        customName: String? = nil
     ) {
         self.path = path
         self.lastModified = lastModified
         self.provider = provider
         self.firstPrompt = firstPrompt
+        self.customName = customName
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,10 +335,24 @@ public struct RecentSession: Codable, Hashable, Sendable, Identifiable {
         self.lastModified = try c.decode(Date.self, forKey: .lastModified)
         self.provider = try c.decode(AgentKind.self, forKey: .provider)
         self.firstPrompt = try c.decodeIfPresent(String.self, forKey: .firstPrompt)
+        // v0.5.10 addition. Decoder-tolerant — older clients omit the field.
+        self.customName = try c.decodeIfPresent(String.self, forKey: .customName)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case path, lastModified, provider, firstPrompt
+        case path, lastModified, provider, firstPrompt, customName
+    }
+}
+
+/// `POST /jsonl-aliases/rename` body. Sent from iOS to the Mac daemon to
+/// rename a Recent JSONL row. `name` nil-or-empty clears the alias.
+public struct RenameJSONLRequest: Codable, Sendable {
+    public let path: String
+    public let name: String?
+
+    public init(path: String, name: String?) {
+        self.path = path
+        self.name = name
     }
 }
 
@@ -394,6 +465,25 @@ public struct AgentRepo: Codable, Hashable, Sendable {
 public enum AgentKind: String, Codable, Hashable, Sendable, CaseIterable {
     case claude
     case codex
+    /// Gemini Code Assist via Google's `gemini` CLI. Added in wire v6
+    /// (2026-05-19). v5 clients fall through `init(from:)` and drop sessions
+    /// tagged with `.gemini` silently instead of erroring the envelope —
+    /// the host's `?? .claude` fallback is a safety net for cases where the
+    /// containing decoder can't tolerate nil. Callers that need to filter
+    /// unknown-agent sessions must compare against `AgentKind.allCases`.
+    case gemini
+
+    /// Lenient decoder (X3-D + Codex P1(5) fix). Forward-compat readers
+    /// keep parsing payloads from newer Macs whose `agent` field carries a
+    /// value this binary doesn't recognize. Unknown raws fold to `.claude`
+    /// rather than throwing the whole AgentSession Codable round-trip.
+    /// Tests assert all known raws (`claude`/`codex`/`gemini`) round-trip
+    /// and an unknown raw (`"future-runtime"`) safely falls back.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        let raw = try c.decode(String.self)
+        self = AgentKind(rawValue: raw) ?? .claude
+    }
 }
 
 /// Where the session executes — the Codex-desktop "mode picker" axis.

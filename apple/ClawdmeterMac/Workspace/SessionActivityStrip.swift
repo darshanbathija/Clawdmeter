@@ -86,6 +86,20 @@ struct SessionActivityStrip: View {
                         : .default,
                     value: animationOpacity
                 )
+        case .gemini:
+            // Reuse the Codex-style "Thinking" label; the Gemini UI
+            // doesn't yet have its own pulsing motif and this keeps the
+            // activity strip working until one ships.
+            Text(active ? "Thinking" : "Idle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .opacity(active ? animationOpacity : 0.5)
+                .animation(
+                    active
+                        ? SessionsV2Theme.pulseAnimation(for: .codex, reduceMotion: reduceMotion)
+                        : .default,
+                    value: animationOpacity
+                )
         }
     }
 
