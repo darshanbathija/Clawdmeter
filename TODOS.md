@@ -116,6 +116,50 @@ are the explicit deferrals.
   ship and Google rotates, retro-actively add the fixtures.
 - **Effort**: S with CC.
 
+### ISSUE-003 — Codex/Gemini menu bar items don't appear after toggle (deferred from /qa 2026-05-19)
+- **What**: Toggling the "Menu bar Codex" or "Menu bar Gemini"
+  checkbox in the dashboard header flips AppStorage but no new
+  `NSStatusItem` materializes — only the Claude burst gauge stays
+  visible. Reproducible when an older Clawdmeter instance is
+  already running (the user's pre-existing menu-bar app), which
+  hints at a multi-instance race for the AppStorage key + status
+  item registration.
+- **Severity**: Low (cosmetic — quota numbers still surface in the
+  dashboard window; menu bar gauges are a convenience surface).
+- **Why deferred**: hard to repro in isolation, needs `osascript` /
+  Accessibility Inspector to introspect NSStatusBar at runtime, and
+  only bites users who run multiple Clawdmeter builds simultaneously.
+- **Hook**: `AppDelegate.applyVisibilityFromPrefs()` +
+  `ProviderStatusController` lifecycle. Likely fix: when AppStorage
+  flips on, force-rebuild the controller's status item even if the
+  one we already own is in a torn-down state. Add a unit test that
+  toggles the key + asserts `NSStatusBar.system.statusItem` for the
+  provider exists.
+- **Effort**: M with CC (~30 min once isolated).
+
+### ISSUE-004 — AnalyticsRepoList missing "+N gem" pills despite Gemini activity (deferred from /qa 2026-05-19)
+- **What**: Token-usage row shows "4 reqs · All time" for Gemini and
+  the Daily-requests chart correctly renders a bar on the active
+  day, but the By-repo list shows zero "+N gem" pills across any
+  repo. The X3-C trunk refactor in `AnalyticsRepoList.swift` is
+  wired to `geminiRequests` per row, but `geminiByRepo` ends up
+  empty.
+- **Root cause hypothesis**: `GeminiUsageParser` writes
+  `UsageRecord(repo: <slug>, ...)` but `UsageHistoryLoader` may not
+  be routing those records through the same `byRepo` aggregation as
+  Claude/Codex. Could also be that records land in the right shape
+  but `RepoIdentity.normalize` slugifies the `tmp/<repo>` dir name
+  differently from Claude's projects-dir slug, so they bucket into a
+  separate "Other" or new ghost repo.
+- **Severity**: Low (top-level Gemini totals + Daily-requests chart
+  still surface activity; only the per-repo attribution is missing).
+- **Hook**: Trace one fixture record through `UsageHistoryLoader`
+  with a print to verify (a) Gemini record reaches `byProvider[.gemini]
+  .byRepo`, (b) the RepoKey matches what Claude/Codex use for the
+  same source dir. Add an integration test alongside
+  `UsageHistoryByProviderTests`.
+- **Effort**: S with CC (~20 min).
+
 ## v0.6 / v1.1 — WhatsApp-smooth Sessions follow-ups (2026-05-19)
 
 ### APNS plan-mode push + UNNotificationAction (deferred from v0.5.0 D6)
