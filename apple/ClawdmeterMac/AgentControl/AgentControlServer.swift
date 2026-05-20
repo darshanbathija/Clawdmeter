@@ -975,6 +975,22 @@ public final class AgentControlServer {
         guard let req = try? JSONDecoder().decode(ContinueReadOnlyRequest.self, from: request.body) else {
             sendResponse(.badRequest, on: connection); return
         }
+        // P1-Mac-7: defensively validate the repoKey before it flows into
+        // `tmux.newWindow(cwd:)`. P1-Mac-6 already rejects CR/LF/control
+        // bytes inside the tmux client, but a compromised paired client
+        // could still ask the daemon to spawn an agent in `..`-traversed
+        // paths or paths outside the user's home. Refuse any repoKey that
+        // isn't an absolute, traversal-free path that resolves under the
+        // user's home directory.
+        guard Self.isValidRepoKey(req.repoKey) else {
+            sendResponse(HTTPResponse(
+                status: 400, reason: "Bad Request",
+                contentType: "application/json",
+                body: Data(#"{"error":"invalid_repo_key"}"#.utf8)
+            ), on: connection)
+            serverLogger.warning("continue-readonly: rejected repoKey \(req.repoKey, privacy: .public)")
+            return
+        }
         let jsonlURL = URL(fileURLWithPath: req.jsonlPath)
         guard FileManager.default.fileExists(atPath: req.jsonlPath) else {
             let body = #"{"error":"jsonl_not_found","path":"\#(req.jsonlPath)"}"#
@@ -2350,6 +2366,28 @@ public final class AgentControlServer {
             body: Data(#"{"error":"rate_limited","retryAfterSeconds":5}"#.utf8),
             extraHeaders: [("Retry-After", "5")]
         )
+    }
+
+    /// P1-Mac-7: validate untrusted repoKey before forwarding to tmux. The
+    /// path must be absolute, contain no `..` segments, hold no CR/LF or
+    /// control bytes, and resolve under the user's home directory. A
+    /// stricter check (against the live RepoIndex snapshot) would be ideal
+    /// but the snapshot is rebuilt async and we don't want to introduce a
+    /// stale window where new repos are rejected.
+    static func isValidRepoKey(_ key: String) -> Bool {
+        guard !key.isEmpty else { return false }
+        guard key.hasPrefix("/") else { return false }
+        for scalar in key.unicodeScalars {
+            if scalar.value < 0x20 || scalar.value == 0x7F { return false }
+        }
+        let parts = key.split(separator: "/", omittingEmptySubsequences: true)
+        for part in parts {
+            if part == ".." || part == "." { return false }
+        }
+        let home = NSHomeDirectory()
+        if home.isEmpty { return true }  // unit-test environments
+        let normalized = (key as NSString).standardizingPath
+        return normalized.hasPrefix(home + "/") || normalized == home
     }
 
     private func sendResponse(_ response: HTTPResponse, on connection: NWConnection) {
