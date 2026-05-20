@@ -4,6 +4,180 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.3 build 49] - 2026-05-20
+
+Audit-track hardening release. 46 atomic fix commits across Mac, iOS,
+Watch, Linux, and shared, addressing P0/P1/P2 findings + Codex
+adversarial pass (codex-1..9) + Codex structured review (P1/P2 rounds
+1-3). Zero new features; the entire release is correctness + lifecycle
++ security hardening on top of v0.7.2's Codex SDK ship.
+
+457/457 swift tests pass. Mac, iOS, Watch all `BUILD SUCCEEDED`.
+
+### Fixed (security + sandbox)
+
+- **Browser PTY paste sanitization** (P0). `InAppBrowser.sendComment`
+  now drops ASCII control bytes (incl. CR/LF) and caps length before
+  pasting into the agent's tmux pane. A page that controls the DOM can
+  no longer terminate the prompt line and inject shell commands into
+  the agent. URL scheme whitelist now also rejects `data:`/`javascript:`/
+  `file:` schemes in `loadCurrentURL`.
+- **tmux command CR/LF injection** (P1-Mac-6). `TmuxControlClient.command()`
+  validates every arg and throws `TmuxError.invalidArgument` on any C0/DEL
+  byte. Without this, a newline in any arg terminates the control-mode line
+  and lets a caller inject a second tmux command.
+- **Artifact path traversal — daemon** (validated). `handleGetArtifact`
+  two-stage canonicalize (`standardizingPath`) + symlink-resolve
+  (`resolvingSymlinksInPath`) + worktree prefix check on both. Blocks
+  `?path=../../../etc/passwd` and symlinks-out planted inside the worktree.
+- **Artifact path traversal — iOS client** (codex-1 walkback of P2-iOS-7).
+  `isSafeArtifactPath` rejects empty + `..`/`.` traversal segments before
+  the HTTP request. Absolute paths now allowed (the agent's `Write` tool
+  routinely emits them). Daemon-side sandbox stays the real defense.
+- **JSONL session-id extraction allowlist** (codex-7). `continue-readonly`
+  daemon endpoint now validates `jsonlPath` against an explicit allowlist
+  (`~/.claude/projects/`, `~/.codex/sessions/`, `~/.codex/projects/`,
+  `~/.gemini/`) before extracting a session id; symlink-resolves before
+  the allowlist check so symlinks-out fail closed.
+- **Repo-key sandbox escape** (P1-Mac-7 + codex-7). `isValidRepoKey` now
+  resolves symlinks before the `$HOME` prefix check; symlinks pointing
+  outside `$HOME` can no longer pass through to `tmux.newWindow`.
+- **WKScriptMessageHandler retain cycle** (P1-Mac-13). `dismantleNSView`
+  removes the script handler and clears nav/UI delegates, breaking the
+  WebView + Coordinator leak on every tab change.
+- **tmux supervisor restart correctness** (P1-Mac-3). `markExited` now
+  resets PTY/readTask/outputSinks/command state so a subsequent
+  supervisor `start()` actually re-spawns instead of silently no-op'ing.
+- **HTTP listener accepts loopback** (P1-Mac-8). Drop
+  `requiredInterfaceType = .other` on the HTTP listener so Mac composer
+  POSTs to 127.0.0.1 reach the accept handler. WS listener was already
+  loose; align them. `isAllowedPeer` remains the actual gate.
+
+### Fixed (lifecycle + races)
+
+- **BGTask double-complete race** (codex-5). New `BGTaskCompletionGuard`
+  wraps `setTaskCompleted` so the in-flight refresh and the expiration
+  handler can't both call it. iOS lifecycle violation eliminated.
+- **iOS chat-store cancellation** (codex-6, P2-iOS-4, P2-iOS-5). Foreground
+  resync now cancels the subscription Task, not just the WS task; sleep
+  is cancellable; loop exits cleanly on client dealloc.
+- **AVCaptureSession serialization** (P2-iOS-3). Pairing scanner moves
+  capture-session lifecycle to a dedicated serial queue. No more main-
+  thread stalls during scan startup.
+- **ShellRunner termination** (P2-Shared-2 + codex-structured-P1 round 3).
+  Set `process.terminationHandler` BEFORE `process.run()` so very short-
+  lived commands (`true`, `which`, small git probes) don't exit before
+  the handler is wired. `ContinuationBox` bridges the cont reference
+  installed later by `withCheckedContinuation`. No more hangs in fast-
+  exit paths.
+- **ShellRunner cancellation** (codex-structured-P2). `withTaskCancellationHandler`
+  bridges caller cancellation to synchronous process termination.
+- **AgentEventStream subscriber wake** (P2-Mac-1). `recordEvent` wakes
+  subscribers immediately instead of waiting for the next poll.
+- **PastedAnthropicTokenProvider singleton + cache** (P1-Shared-2 + codex-2).
+  `shared()` is a true singleton (one Keychain key for all callers).
+  `setToken("")` clears the in-memory cache unconditionally — even when
+  Keychain delete fails — so "Sign out" can't leave a stale token
+  serving the daemon, iPhone, and Watch.
+
+### Fixed (network + IPv6)
+
+- **IPv6 port-strip walkback** (codex-4 rollback of P2-Mac-4). The earlier
+  "strip ≤5 digit numeric tail after last colon" heuristic broke bare
+  IPv6 addresses where the final hextet is numeric (`fd7a:115c:a1e0::1`
+  → `fd7a:115c:a1e0::`). Pass unbracketed IPv6 through unchanged; bracket
+  per RFC 3986 if you need IPv6+port.
+- **IPv6 bracketing in Live Activity push register** (P1-Mac-19). Bracket
+  IPv6 hosts so APNS push token registration works on IPv6-only Tailscale.
+
+### Fixed (Linux daemon)
+
+- **Linux build breakers** (codex-structured-P1 + round 2). Daemon target
+  now declares `ClawdmeterLinux` as a dependency (HummingbirdTransport +
+  LinuxPairingTokenStore live there). `Duration` cast fixed in daemon
+  main.swift.
+- **OSLog cross-platform gate** (P2-Linux-2 + codex-structured-P1).
+  `#if canImport(OSLog)` around `import OSLog`; Linux falls back to a
+  stderr-print helper. Same pattern applied to all shared SwiftUI views
+  via `#if canImport(SwiftUI)` (P1-Linux-1).
+- **HummingbirdTransport wiring** (P1-Linux-4). Daemon entrypoint now
+  constructs and starts HummingbirdTransport.
+- **runtimeDir ownership + adapter lock** (P1-Linux-5 + P1-Linux-6 + codex-3).
+  Daemon validates runtimeDir mode, ownership, non-symlink before use.
+  Adapter lock acquisition fails loud on contention.
+- **Packaging scripts fail loud** (P1-Linux-3). AppImage + .deb scripts now
+  exit non-zero when no artifact is produced.
+- **replaceItem first-run crash** (P0). Switched `replaceItem(at:)` to
+  `Data.write(to:options:.atomic)` in `LinuxUsageStore` + `CairoGaugeRenderer`
+  — Swift Corelibs Foundation throws when the destination doesn't exist.
+- **Visual tests degrade gracefully** (P1-Linux-2). Skip visual baselines
+  when not committed; `CLAWDMETER_VISUAL_TEST_STRICT=1` to enforce strictly.
+
+### Fixed (rendering + analytics)
+
+- **MarkdownRenderer source cache** (P1-Mac-12). Parsed source cached
+  alongside chunks; eliminates re-parse cost on every assistant turn.
+- **Markdown stale parse + event replay + fd leak** (codex-structured-P2
+  round 3). Three independent bugs in the same family caught by the
+  structured Codex pass.
+- **Pricing input split** (codex-structured-P2). Long-context tier check
+  now correctly splits input tokens.
+- **Gemini analytics tier check** (P1-Shared-1). `Pricing` now includes
+  cache-read tokens in the 200k long-context tier threshold (mirrors how
+  Anthropic counts them).
+
+### Fixed (UI + status)
+
+- **GitDiffPane FD double-close + space-in-path** (P1-Mac-14). Stop closing
+  the same fd twice; diff header now handles paths containing spaces.
+- **iOS SessionDetailView live state** (P1-Mac-20). Reads live session
+  from the client instead of stale cache.
+- **Notification ack scope** (P1-Mac-21). Only ack notifications that were
+  actually delivered.
+- **Pairing revoke truly disables** (P1-Mac-17). Revoked tokens stay
+  revoked until explicit regenerate, not just until next process restart.
+- **Gemini token refresh** (P1-Mac-10). `refreshIfNeeded` throws on
+  expired refresh instead of returning a stale token.
+
+### Fixed (Watch + iPhone bridge)
+
+- **WatchPlanBridge merge** (P1-Watch-4). Bridge context payload merge no
+  longer drops fields when an older watch reads a newer payload.
+- **Widget reload + approval ack fallback** (P1-Watch-1, P1-Watch-2).
+  Complications reload on approval; ack path falls back when WCSession is
+  cold.
+- **sessionsSummaryJSON decode logging** (P2-Watch-2). Surfaces silent
+  decode failures so future schema drift doesn't disappear.
+- **Tmux path on iPhone bridge** (P1-Tools-1). Honor `$PATH` instead of
+  hardcoding `/opt/homebrew/bin/tmux`.
+
+### Fixed (resolution + repo)
+
+- **Relative gitdir resolution** (P2-Shared-1). `RepoIdentity` resolves
+  relative `gitdir:` paths against the `.git` file's parent (worktrees
+  with relative pointers now canonicalize correctly).
+
+### Fixed (P2 batch)
+
+- BGTask expiration timing tightened; paste trim normalizes trailing
+  whitespace; deb control file version aligned; `.desktop` `Exec` line
+  uses absolute path.
+
+### Docs
+
+- `TODOS.md` gains an "Audit-track follow-ups" section tracking the
+  three env-flagged stub bypasses, five missing regression tests, and
+  the path-validator / fire-once duplication for future cleanup.
+- `.gstack/qa-reports/qa-report-clawdmeter-bugfix-audit-fixes-v2-2026-05-20.md`
+  captures the /qa run that fixed the TmuxError exhaustiveness gap.
+
+### Not included
+
+The v0.7.3 codex-sdk-v073 feature work (CodexSubscriptionRelay
+multi-subscriber refactor + CodexSDKEventIngestor) was attempted on a
+separate branch but conflicted heavily with this audit campaign's diff.
+It will land on a clean follow-up branch once the audit landing settles.
+
 ## [0.7.2 build 48] - 2026-05-20
 
 Codex SDK observation — the user-visible glue. v0.7.0 shipped
