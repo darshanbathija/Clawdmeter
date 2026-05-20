@@ -872,7 +872,9 @@ public struct NewSessionRequest: Codable, Sendable {
     /// (to derive a slug for the worktree directory name).
     public let goal: String?
     /// If true, `WorktreeManager` runs `git worktree add` before spawning
-    /// and the agent's cwd becomes the worktree path.
+    /// and the agent's cwd becomes the worktree path. v0.7.9: defaulted
+    /// to `true` everywhere — every new session lands in a city-named
+    /// worktree + branch (see `WorktreeManager.slug(city:)`).
     public let useWorktree: Bool
     /// Base branch for the worktree. `nil` defaults to the repo's HEAD.
     public let baseBranch: String?
@@ -889,7 +891,7 @@ public struct NewSessionRequest: Codable, Sendable {
         model: String? = nil,
         planMode: Bool = false,
         goal: String? = nil,
-        useWorktree: Bool = false,
+        useWorktree: Bool = true,
         baseBranch: String? = nil,
         effort: ReasoningEffort? = nil,
         abPair: AgentKind? = nil
@@ -913,7 +915,10 @@ public struct NewSessionRequest: Codable, Sendable {
         self.model = try c.decodeIfPresent(String.self, forKey: .model)
         self.planMode = (try? c.decode(Bool.self, forKey: .planMode)) ?? false
         self.goal = try c.decodeIfPresent(String.self, forKey: .goal)
-        self.useWorktree = (try? c.decode(Bool.self, forKey: .useWorktree)) ?? false
+        // v0.7.9: default flipped to true. Older v6/v7 clients that
+        // omit the field now opt into worktrees automatically — same
+        // behaviour as the v0.7.9+ UI which has no explicit mode chip.
+        self.useWorktree = (try? c.decode(Bool.self, forKey: .useWorktree)) ?? true
         self.baseBranch = try c.decodeIfPresent(String.self, forKey: .baseBranch)
         self.effort = try c.decodeIfPresent(ReasoningEffort.self, forKey: .effort)
         self.abPair = try c.decodeIfPresent(AgentKind.self, forKey: .abPair)

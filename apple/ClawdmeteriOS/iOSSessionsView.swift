@@ -1614,11 +1614,10 @@ private struct NewSessionSheet: View {
                 }
 
                 Section("Run mode") {
-                    Picker("Mode", selection: $mode) {
-                        Text("Local").tag(SessionMode.local)
-                        Text("Worktree").tag(SessionMode.worktree)
-                    }
-                    .pickerStyle(.segmented)
+                    // v0.7.9: Mode picker removed. Every new session
+                    // lands in a city-named worktree by default; the
+                    // SessionMode enum stays in the wire for
+                    // back-compat with persisted v3 sessions.
 
                     // Plan mode applies to both agents. Claude maps it
                     // to `--permission-mode plan`; Codex maps it to

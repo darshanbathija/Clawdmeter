@@ -27,7 +27,9 @@ struct NewSessionMacSheet: View {
     @State private var agent: AgentKind = .claude
     @State private var goal: String = ""
     @State private var planMode: Bool = true
-    @State private var mode: SessionMode = .local
+    // v0.7.9: worktree by default. Local stays in the enum for
+    // back-compat but the mode chip is no longer in the New Session UI.
+    @State private var mode: SessionMode = .worktree
     @State private var isSpawning: Bool = false
     @State private var errorMessage: String?
 
@@ -77,12 +79,13 @@ struct NewSessionMacSheet: View {
                         }
                     }())
 
-                Picker("Mode", selection: $mode) {
-                    Text("Local").tag(SessionMode.local)
-                    Text("Worktree").tag(SessionMode.worktree)
-                }
-                .pickerStyle(.segmented)
-                .help("Local: agent runs in the repo cwd. Worktree: agent runs in .claude/worktrees/<slug> so it can't stomp your edits.")
+                // v0.7.9: Mode picker removed. Worktree is the only
+                // mode new sessions land in — the agent always runs
+                // in `.claude/worktrees/<city>/` on a branch named
+                // after the city (assigned via CityNamer). Local mode
+                // is still in the enum for back-compat with persisted
+                // sessions and is still reachable through the
+                // Session detail mode-swap action.
             }
 
             if let errorMessage {
@@ -529,9 +532,15 @@ public final class SessionsModel: ObservableObject {
         var worktreePath: String? = nil
         // Skip worktree creation for resumes — the CLI handles cwd from JSONL.
         if mode == .worktree, resumeSessionId == nil {
-            let slug = WorktreeManager.slug(goal: goal, sessionId: UUID())
+            // v0.7.9: city-named worktree + matching branch. Mint up
+            // front so the path slug + branch use the same name.
+            let provisionalSessionId = UUID()
+            let city = CityNamer.shared.cityName(for: provisionalSessionId)
+            let slug = WorktreeManager.slug(city: city)
             worktreePath = try await WorktreeManager.shared.add(
-                repoRoot: repoPath, slug: slug
+                repoRoot: repoPath,
+                slug: slug,
+                branchName: slug
             )
             cwd = worktreePath!
         }
@@ -710,10 +719,16 @@ public final class SessionsModel: ObservableObject {
         var newWorktree: String? = nil
         switch newMode {
         case .worktree:
-            let slug = WorktreeManager.slug(goal: session.goal, sessionId: session.id)
+            // v0.7.9: reuse the session's already-assigned city for
+            // its worktree branch. Mid-session swap → same city as
+            // the sidebar label so user mental model stays consistent.
+            let city = CityNamer.shared.cityName(for: session.id)
+            let slug = WorktreeManager.slug(city: city)
             do {
                 newWorktree = try await WorktreeManager.shared.add(
-                    repoRoot: session.repoKey, slug: slug
+                    repoRoot: session.repoKey,
+                    slug: slug,
+                    branchName: slug
                 )
                 newCwd = newWorktree!
             } catch {

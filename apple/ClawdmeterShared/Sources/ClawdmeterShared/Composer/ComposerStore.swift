@@ -74,7 +74,11 @@ public final class ComposerStore: ObservableObject {
     @Published public private(set) var attachments: [Attachment] = []
     @Published public var modelId: String?
     @Published public var effort: ReasoningEffort?
-    @Published public var mode: SessionMode = .local
+    // v0.7.9: every new composer session lands in a worktree by default.
+    // The Local/Worktree/Cloud chip has been removed from the UI; the
+    // SessionMode enum stays for back-compat with persisted v3 sessions
+    // that recorded `.local` before this change.
+    @Published public var mode: SessionMode = .worktree
     @Published public var planMode: Bool = false
     @Published public var autopilotEnabled: Bool = false
     /// Claude-Code-style permission mode for the empty-state composer.

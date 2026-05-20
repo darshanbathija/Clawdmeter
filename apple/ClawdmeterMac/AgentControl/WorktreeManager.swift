@@ -31,9 +31,32 @@ public actor WorktreeManager {
 
     // MARK: - Slug + path derivation
 
-    /// Derive a worktree slug from a goal + session id. Per D7:
-    /// `<goal-slug-or-session>-<shortid>` where goal-slug is the goal
-    /// lowercased, non-alphanumeric → `-`, truncated to 24 chars.
+    /// v0.7.9: derive a worktree slug from a city name (assigned via
+    /// `CityNamer.shared.cityName(for:)`). Multi-word cities collapse
+    /// to kebab-case: "Cape Town" → "cape-town", "São Paulo" → "sao-paulo".
+    /// Stable, unique per session because CityNamer guarantees uniqueness
+    /// across live assignments.
+    public static func slug(city: String) -> String {
+        // Lowercase + map non-[a-z0-9] to '-' so both worktree path and
+        // git branch name are filesystem- and ref-safe. Diacritics get
+        // folded via `String.applyingTransform(.stripDiacritics)` first.
+        let folded = city
+            .applyingTransform(.stripDiacritics, reverse: false) ?? city
+        let cleaned = folded.lowercased().unicodeScalars.map { scalar -> String in
+            if (scalar.value >= 0x30 && scalar.value <= 0x39) ||  // 0-9
+               (scalar.value >= 0x61 && scalar.value <= 0x7A) {   // a-z
+                return String(scalar)
+            }
+            return "-"
+        }.joined()
+        let collapsed = cleaned.split(separator: "-").joined(separator: "-")
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "session" : trimmed
+    }
+
+    /// Legacy slug derivation (goal + session-id-shortid). Kept for
+    /// back-compat with code paths that haven't been migrated to the
+    /// city-named worktrees yet; new spawns should call `slug(city:)`.
     public static func slug(goal: String?, sessionId: UUID) -> String {
         let shortId = sessionId.uuidString.replacingOccurrences(of: "-", with: "").prefix(6).lowercased()
         let goalSlug: String
@@ -62,10 +85,23 @@ public actor WorktreeManager {
 
     // MARK: - Create
 
-    /// `git worktree add <path> <baseBranch>`. Returns the absolute worktree
-    /// path on success. If a directory at the chosen path already exists
-    /// (collision), suffixes `-2`, `-3`, etc. before retrying.
-    public func add(repoRoot: String, slug: String, baseBranch: String? = nil) async throws -> String {
+    /// `git worktree add <path> [<baseBranch>]` — or, when `branchName`
+    /// is supplied, `git worktree add -b <branchName> <path> [<baseBranch>]`
+    /// to create a new branch off the base. Returns the absolute
+    /// worktree path on success. If a directory at the chosen path
+    /// already exists (collision), suffixes `-2`, `-3`, etc. before
+    /// retrying.
+    ///
+    /// v0.7.9: callers pass `branchName` so the worktree's branch is
+    /// named after the session's assigned city (e.g. `cape-town`)
+    /// instead of `HEAD-detached-at-<sha>`. Branch shows up in
+    /// `git branch` output + on the PR creation path.
+    public func add(
+        repoRoot: String,
+        slug: String,
+        branchName: String? = nil,
+        baseBranch: String? = nil
+    ) async throws -> String {
         if gitBinary == nil {
             gitBinary = ShellRunner.locateBinary("git")
         }
@@ -89,7 +125,33 @@ public actor WorktreeManager {
             atPath: parent, withIntermediateDirectories: true
         )
 
-        var args = ["worktree", "add", path]
+        // Branch-name collision: if `branchName` is taken, suffix
+        // matching the path's `finalSlug` so worktree + branch stay
+        // 1:1. `git branch --list <name>` returns the name if it
+        // exists, empty otherwise.
+        var finalBranchName = branchName
+        if let bn = branchName {
+            let listResult = try await ShellRunner.shared.run(
+                executable: git,
+                arguments: ["branch", "--list", bn],
+                cwd: repoRoot,
+                timeout: 10
+            )
+            let exists = !listResult.stdoutString
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            if exists {
+                // Mirror the worktree-path suffix.
+                let attemptSuffix = String(finalSlug.dropFirst(slug.count))
+                finalBranchName = bn + attemptSuffix
+            }
+        }
+
+        var args: [String] = ["worktree", "add"]
+        if let bn = finalBranchName {
+            args.append(contentsOf: ["-b", bn])
+        }
+        args.append(path)
         if let baseBranch {
             args.append(baseBranch)
         }
@@ -105,7 +167,7 @@ public actor WorktreeManager {
                 stderr: result.stderrString
             )
         }
-        worktreeLogger.info("Created worktree at \(path, privacy: .public)")
+        worktreeLogger.info("Created worktree at \(path, privacy: .public) branch=\(finalBranchName ?? "(checked-out)", privacy: .public)")
         return path
     }
 

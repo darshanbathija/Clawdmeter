@@ -228,9 +228,14 @@ struct ComposerInputCore: View {
 
             switch store.modeKind {
             case .bound:
-                ModePicker(mode: store.mode, agent: store.agent) { newMode in
-                    store.mode = newMode
-                }
+                // v0.7.9: ModePicker removed. Worktree is the only mode
+                // new sessions land in (every session gets its own city-
+                // named branch); Local stays in the enum for back-compat
+                // with persisted v3 sessions. Mid-session Mode swap is
+                // still possible via the Session detail header for the
+                // edge cases where a user explicitly wants to move into
+                // the primary checkout.
+                EmptyView()
             case .emptyState:
                 Picker("Agent", selection: $store.agent) {
                     Text("Claude").tag(AgentKind.claude)
@@ -240,9 +245,6 @@ struct ComposerInputCore: View {
                 .pickerStyle(.segmented)
                 .frame(width: 200)
                 .labelsHidden()
-                ModePicker(mode: store.mode, agent: store.agent) { newMode in
-                    store.mode = newMode
-                }
             }
 
             Spacer(minLength: 6)

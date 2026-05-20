@@ -2060,19 +2060,37 @@ public final class AgentControlServer {
         }
 
         // Determine the cwd: repo root, or new worktree path if useWorktree.
+        // v0.7.9: worktrees are now the default for every new session, and
+        // we use the session's CityNamer-assigned city as both the worktree
+        // path slug AND the git branch name. Result: `git branch` lists
+        // `cape-town` / `oslo` / `kyoto` instead of `<goal>-abcd12`, and
+        // the worktree lives at `<repo>/.claude/worktrees/cape-town/`.
         var cwd = req.repoKey  // assume repoKey is an absolute path
         var worktreePath: String? = nil
         if req.useWorktree {
-            let slug = WorktreeManager.slug(goal: req.goal, sessionId: UUID())
+            // Mint a city up front so the worktree path + branch use the
+            // same name. The session id we'll register with is captured
+            // here so CityNamer's mapping is stable.
+            let provisionalSessionId = UUID()
+            let city = await MainActor.run {
+                CityNamer.shared.cityName(for: provisionalSessionId)
+            }
+            let slug = WorktreeManager.slug(city: city)
             do {
                 worktreePath = try await WorktreeManager.shared.add(
                     repoRoot: req.repoKey,
                     slug: slug,
+                    branchName: slug,
                     baseBranch: req.baseBranch
                 )
                 cwd = worktreePath!
             } catch {
                 serverLogger.error("worktree add failed: \(error.localizedDescription, privacy: .public)")
+                // Release the city back to the pool — we didn't actually
+                // create the session.
+                await MainActor.run {
+                    CityNamer.shared.release(provisionalSessionId)
+                }
                 sendResponse(.internalError, on: connection)
                 return
             }

@@ -4,6 +4,48 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.9 build 55] - 2026-05-21
+
+Worktree-by-default + city-named branches.
+
+### Changed
+
+- **New sessions land in a worktree by default**, every time. The
+  Local / Worktree / Cloud chip is gone from the composer (Mac
+  empty-state composer + bound chip strip), the New Session sheet
+  (Mac + iOS), and the segmented Run-mode picker on iOS. Every new
+  session now runs in `<repo>/.claude/worktrees/<city>/` on a fresh
+  branch named after the same city. SessionMode enum stays for
+  back-compat with persisted v3 sessions; mid-session Local↔Worktree
+  swap is still reachable through the Session detail header.
+- **Worktree branches are named after a city.** `WorktreeManager.add`
+  now accepts a `branchName` and runs `git worktree add -b <branch>
+  <path>`. The branch + worktree folder use the same name. Cities
+  come from the existing `CityNamer` (assigned per session id,
+  deduplicated across the live set, persisted to
+  `~/Library/Application Support/Clawdmeter/city-assignments.json`).
+  Multi-word cities collapse to kebab-case via
+  `WorktreeManager.slug(city:)` (e.g. "Cape Town" → `cape-town`,
+  "São Paulo" → `sao-paulo`).
+- **Default flipped on `NewSessionRequest.useWorktree`** to `true`.
+  Older v6/v7 paired Macs that omit the field now opt into worktrees
+  automatically — same behaviour as the v0.7.9+ UI.
+
+### Implementation notes
+
+- `WorktreeManager.slug(city:)` strips diacritics, lowercases,
+  collapses non-alphanumerics to `-`, and trims edge `-`.
+- `WorktreeManager.add` detects branch-name collisions via
+  `git branch --list` and mirrors the worktree-path suffix
+  (`cape-town-2`) so worktree dir + branch stay 1:1.
+- City mint happens in the spawn path BEFORE `git worktree add`,
+  using a `provisionalSessionId`. On worktree-create failure the
+  daemon releases the city back to the pool via
+  `CityNamer.shared.release(_:)`.
+- Mid-session Worktree swap (`SessionsView.switchMode`) reuses the
+  session's already-assigned city so the sidebar label stays
+  consistent.
+
 ## [0.7.8 build 54] - 2026-05-20
 
 Codex SDK parity ship. Closes the three surfaces Antigravity SDK has
