@@ -4,6 +4,82 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.4 build 50] - 2026-05-20
+
+The deferred v0.7.3 codex-sdk feature work, now landed cleanly on top
+of the audit campaign. Plus the TOCTOU fix flagged in /review and the
+first regression-test suite from the audit-track follow-ups.
+
+460 swift tests (was 457). Mac + iOS + Watch all `BUILD SUCCEEDED`.
+
+### Added
+
+- **Multi-subscriber Codex SDK relay.** `CodexSubscriptionRelay` now
+  exposes `subscribe(sessionId:) -> AnyPublisher<CodexRelayEvent, Never>`
+  alongside the legacy AsyncStream. Each session gets a
+  PassthroughSubject under the hood so the Mac chat ingestor, the iOS
+  WebSocket channel, and ad-hoc subscribers can all observe the same
+  session's events without contending for the single AsyncStream slot
+  the v0.7.2 relay had. New `event.rawDict()` accessor.
+- **`CodexSDKEventIngestor` — SDK events into the chat pipeline.**
+  Subscribes to the relay for one session and translates the SDK's
+  typed item events (agent_message, reasoning, command_execution,
+  file_change, mcp_tool_call, web_search, todo_list, error) into
+  `ChatMessage` records via the new public
+  `SessionChatStore.appendSDKMessages` method. `turn.completed` token
+  usage flows through as a zero-message staging tick so the cost
+  ticker updates. Result: SDK observation rides the existing
+  `chat-subscribe` WebSocket pipeline — iOS sees SDK-observed turns
+  in the same chat feed that already carries Claude + Codex CLI.
+- **`codex-stream-subscribe` WebSocket op.** Optional raw-event
+  channel for clients that want the unprocessed SDK event stream
+  (debug overlays, future Plan-mode-style trackers). Sends a typed
+  envelope per event: kind + threadId + subscriptionId + receivedAt
+  + raw payload. Coexists with the chat-side ingestor — both
+  subscribe via the multi-subscriber subject.
+- **iOS handoff UX for Codex SDK resume.**
+  `.deliveredWithCodexResume(threadId, response)` no longer silently
+  dismisses the New Session sheet. Now presents
+  `CodexResumeResultSheet` with the SDK response inline + a "Copy
+  thread ID" button so the user can paste it into a follow-up draft
+  to continue the same turn. Cross-device focus-on-Mac is deferred
+  (needs Handoff or Universal Links setup with an apple.com domain).
+
+### Fixed
+
+- **`handleGetArtifact` TOCTOU race.** Was: validate-then-read had a
+  window between `resolvingSymlinksInPath` (validation) and
+  `Data(contentsOf:)` (read) where an agent with worktree write
+  could replace the validated regular file with a symlink. Now uses
+  `open(O_RDONLY | O_NOFOLLOW)` so ELOOP at the final component fails
+  immediately (HTTP 403), then `fstat` the live fd to enforce the
+  50MB cap on the inode we actually have open, and reads from that
+  fd. Size check and read operate on the same inode — no race window.
+  Refuses non-regular files defensively. Flagged by the /review
+  security specialist on `bugfix/audit-fixes-v2`.
+
+### Tests
+
+- **`PastedAnthropicTokenProviderTests` (3 cases).** Regression suite
+  for the P1-Shared-2 + codex-2 invariants:
+  - `shared()` returns the same instance (singleton).
+  - `setToken("")` clears the in-memory cache (so "Sign out" doesn't
+    leak the stale token to the daemon).
+  - Whitespace-only tokens are treated as empty (the trim guard).
+  Skips gracefully when the test environment doesn't have an
+  accessible Keychain (CI without unlocked login keychain). 457 → 460
+  passing in `ClawdmeterShared`.
+
+### Not landed (still deferred to a future branch)
+
+The remaining four regression tests from /review need either a new Mac
+test target in `apple/project.yml` (`isValidJsonlPath`,
+`isValidRepoKey`, `TailscaleWhois.ipOnly`) or architectural surgery
+(`TmuxControlClient` argv validation + lifecycle tests need an
+extracted static helper + PTY mocking). Path-validator + fire-once
+helper consolidation also remains on `TODOS.md`. None of these block
+v0.7.4 shipping.
+
 ## [0.7.3 build 49] - 2026-05-20
 
 Audit-track hardening release. 46 atomic fix commits across Mac, iOS,
