@@ -52,7 +52,14 @@ public enum AgentControlWireVersion {
     /// or WS ops in v8 — the SDK observation mode rides on the existing
     /// `/usage` envelope; the field tells iOS to render "· SDK mode" on
     /// the Codex analytics subtitle.
-    public static let current: Int = 8
+    /// v9 (2026-05-21) Chat tab: new endpoints (POST /chat-sessions,
+    /// POST /chat-sessions/frontier/*, GET /chat-providers) + Frontier
+    /// WS op (`frontier-subscribe`). AgentSession schema v5 adds
+    /// optional `kind`, `frontierGroupId`, `frontierChildIndex`,
+    /// `codexChatBackend`, `codexChatThreadId`; `repoKey` becomes
+    /// optional. New `chatMinimum/frontierMinimum/codexChatBackendMinimum`
+    /// = 9 gates. iOS Chat tab gates on `serverWireVersion >= chatMinimum`.
+    public static let current: Int = 9
     /// Minimum wire version that supports the `compose-draft` WS op.
     /// iOS guards `postComposeDraft` on this — older Macs would reject
     /// the unknown op via `.unsupportedData` close (review §10 finding).
@@ -79,6 +86,23 @@ public enum AgentControlWireVersion {
     /// with a v8 iOS hide the "· SDK mode" subtitle and assume Disk
     /// mode by default.
     public static let codexSDKMinimum: Int = 8
+
+    /// Minimum wire version that supports the Chat tab endpoints
+    /// (`POST /chat-sessions`, `GET /chat-providers`, schema v5 fields).
+    /// iOS hides the Chat tab when `serverWireVersion < this`.
+    public static let chatMinimum: Int = 9
+
+    /// Minimum wire version that supports Frontier compare endpoints
+    /// (`POST /chat-sessions/frontier/*`, `frontier-subscribe` WS op).
+    /// Daemon endpoints ship in v0.8 for forward-compat; the Mac/iOS UI
+    /// lands in v0.9 alongside the Antigravity (agy) replacement for
+    /// gemini CLI.
+    public static let frontierMinimum: Int = 9
+
+    /// Minimum wire version that supports the per-session Codex chat
+    /// backend choice (`AgentSession.codexChatBackend`). Older Macs
+    /// ignore the per-request override.
+    public static let codexChatBackendMinimum: Int = 9
 
     /// Forward-compat client-side check (X3-A). Returns `true` when the
     /// client should flag a mismatch banner. The contract is *forward-
@@ -127,6 +151,27 @@ public enum AgentControlWireVersion {
     public static func supportsCodexSDK(serverWireVersion: Int?) -> Bool {
         guard let v = serverWireVersion else { return false }
         return v >= codexSDKMinimum
+    }
+
+    /// Whether the paired Mac is wire v9+ and therefore exposes the
+    /// Chat tab endpoints. iOS gates Chat tab visibility on this.
+    public static func supportsChat(serverWireVersion: Int?) -> Bool {
+        guard let v = serverWireVersion else { return false }
+        return v >= chatMinimum
+    }
+
+    /// Whether the paired Mac is wire v9+ and therefore exposes the
+    /// Frontier endpoints. iOS gates the (v0.9) Frontier UI on this.
+    public static func supportsFrontier(serverWireVersion: Int?) -> Bool {
+        guard let v = serverWireVersion else { return false }
+        return v >= frontierMinimum
+    }
+
+    /// Whether the paired Mac is wire v9+ and therefore honors the
+    /// per-request `codexChatBackend` override on `POST /chat-sessions`.
+    public static func supportsCodexChatBackend(serverWireVersion: Int?) -> Bool {
+        guard let v = serverWireVersion else { return false }
+        return v >= codexChatBackendMinimum
     }
 }
 
@@ -1968,5 +2013,228 @@ public struct WireTokenUsage: Codable, Equatable, Sendable {
         self.thoughts = thoughts
         self.cached = cached
         self.isEstimate = isEstimate
+    }
+}
+
+// MARK: - Chat tab (v0.8 — wire v9)
+
+/// `POST /chat-sessions` request body. Spawns a new chat session
+/// (`AgentSession.kind == .chat`) with an empty per-session chat-cwd.
+/// `effort` is optional and only honored by Claude/Codex; gemini chat
+/// returns 501 in v0.8 until the Antigravity (agy) replacement lands
+/// in v0.9. `codexChatBackend` overrides the server-side default per
+/// session; nil means "use the pairing default" (RE1 SDK).
+public struct CreateChatSessionRequest: Codable, Sendable {
+    public let provider: AgentKind
+    public let model: String?
+    public let effort: ReasoningEffort?
+    public let codexChatBackend: CodexChatBackend?
+
+    public init(
+        provider: AgentKind,
+        model: String? = nil,
+        effort: ReasoningEffort? = nil,
+        codexChatBackend: CodexChatBackend? = nil
+    ) {
+        self.provider = provider
+        self.model = model
+        self.effort = effort
+        self.codexChatBackend = codexChatBackend
+    }
+}
+
+/// `POST /chat-sessions/frontier` request body. `clientRequestId`
+/// enables 60s idempotency-keyed dedup per CM5 — retries with the same
+/// id return the existing group instead of spawning duplicates. `models`
+/// is the per-slot model list (2-3 entries in v0.8; v0.9 ships full
+/// 3-pane UI once Gemini joins via agy).
+public struct CreateFrontierRequest: Codable, Sendable {
+    public let clientRequestId: UUID
+    public let models: [FrontierModelSlot]
+
+    public init(clientRequestId: UUID, models: [FrontierModelSlot]) {
+        self.clientRequestId = clientRequestId
+        self.models = models
+    }
+}
+
+/// One slot in a Frontier group spawn request — the provider + model +
+/// optional Codex backend choice for that pane.
+public struct FrontierModelSlot: Codable, Sendable {
+    public let provider: AgentKind
+    public let model: String?
+    public let codexChatBackend: CodexChatBackend?
+
+    public init(
+        provider: AgentKind,
+        model: String? = nil,
+        codexChatBackend: CodexChatBackend? = nil
+    ) {
+        self.provider = provider
+        self.model = model
+        self.codexChatBackend = codexChatBackend
+    }
+}
+
+/// `POST /chat-sessions/frontier` response. Per-slot results (E2):
+/// each spawn attempt reports ok or failed independently so a partial
+/// Frontier (D10) returns the live slots + the failure reasons in one
+/// shot. `groupId` is consistent across retries with the same
+/// `clientRequestId` (CM5 idempotency).
+public struct CreateFrontierResponse: Codable, Sendable {
+    public let groupId: UUID
+    public let slots: [FrontierSlotResult]
+
+    public init(groupId: UUID, slots: [FrontierSlotResult]) {
+        self.groupId = groupId
+        self.slots = slots
+    }
+}
+
+/// One slot's spawn outcome within a Frontier group.
+public struct FrontierSlotResult: Codable, Sendable {
+    public let index: Int
+    /// .ok or .failed — discriminated via `sessionId` (set on ok) vs
+    /// `reason` (set on failed).
+    public let sessionId: UUID?
+    public let reason: String?
+
+    public init(index: Int, sessionId: UUID? = nil, reason: String? = nil) {
+        self.index = index
+        self.sessionId = sessionId
+        self.reason = reason
+    }
+
+    public var isOK: Bool { sessionId != nil }
+}
+
+/// `POST /chat-sessions/frontier/:groupId/retry-slot` request body.
+/// Re-spawns a failed slot per D10 retry affordance.
+public struct RetryFrontierSlotRequest: Codable, Sendable {
+    public let index: Int
+
+    public init(index: Int) {
+        self.index = index
+    }
+}
+
+/// `POST /chat-sessions/frontier/:groupId/pick-winner` request body.
+/// Forks the chosen child into a fresh Solo chat seeded with that
+/// child's transcript. Reuses the existing A/B-pair pick-winner pattern.
+public struct PickFrontierWinnerRequest: Codable, Sendable {
+    public let childIndex: Int
+
+    public init(childIndex: Int) {
+        self.childIndex = childIndex
+    }
+}
+
+/// `frontier-subscribe` WS envelope — typed snapshot per D8 + Codex #5.
+/// Emitted on every debounce tick (100ms, same as chat-subscribe). Each
+/// envelope is self-contained; consumers replace their state with the
+/// latest snapshot rather than diff-applying events.
+public struct FrontierGroupSnapshot: Codable, Sendable {
+    public let groupId: UUID
+    /// Monotonic counter; advances on any child update. Lets the client
+    /// debounce its own UI work if it wants.
+    public let updateCounter: Int
+    public let children: [FrontierChild]
+
+    public init(groupId: UUID, updateCounter: Int, children: [FrontierChild]) {
+        self.groupId = groupId
+        self.updateCounter = updateCounter
+        self.children = children
+    }
+}
+
+/// One child entry inside a `FrontierGroupSnapshot`.
+public struct FrontierChild: Codable, Sendable {
+    public let childIndex: Int
+    public let sessionId: UUID
+    public let modelSlug: String
+    /// Nil when the child failed to spawn (D10 partial Frontier).
+    public let snapshot: WireChatSnapshot?
+    public let status: FrontierChildStatus
+
+    public init(
+        childIndex: Int,
+        sessionId: UUID,
+        modelSlug: String,
+        snapshot: WireChatSnapshot? = nil,
+        status: FrontierChildStatus
+    ) {
+        self.childIndex = childIndex
+        self.sessionId = sessionId
+        self.modelSlug = modelSlug
+        self.snapshot = snapshot
+        self.status = status
+    }
+}
+
+/// Per-child status in a Frontier group. Lenient decode for forward-compat.
+public enum FrontierChildStatus: String, Codable, Hashable, Sendable, CaseIterable {
+    case pending
+    case streaming
+    case complete
+    case failed
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        let raw = try c.decode(String.self)
+        self = FrontierChildStatus(rawValue: raw) ?? .pending
+    }
+}
+
+/// `GET /chat-providers` response. Per DG4 capability probe + CM3
+/// observer state. Codex has two sub-rows (sdk + cli); Gemini is
+/// hardcoded `available: false, reason: "v0.9"` until Antigravity
+/// (agy) ships.
+public struct ChatProvidersResponse: Codable, Sendable {
+    public let providers: [ChatProviderEntry]
+
+    public init(providers: [ChatProviderEntry]) {
+        self.providers = providers
+    }
+}
+
+/// One row in `ChatProvidersResponse`. For Codex, two entries (one per
+/// backend) appear; for Claude/Gemini, one entry each.
+public struct ChatProviderEntry: Codable, Sendable {
+    public let provider: AgentKind
+    /// For Codex: the backend variant this row describes. Nil for
+    /// non-Codex.
+    public let codexBackend: CodexChatBackend?
+    /// True when the binary / sidecar is present and reachable.
+    public let available: Bool
+    /// True when the OAuth tokens are present and valid (per the CM3
+    /// observer's last check).
+    public let authenticated: Bool
+    /// True when DG1 + DG4 capability probe passed (no FS mutation,
+    /// no shell exec, no network beyond provider; auth file present;
+    /// transcript parses to expected shape).
+    public let capabilityProbePassed: Bool
+    /// ISO8601 timestamp of the last probe run, or nil if never probed.
+    public let lastProbedAt: Date?
+    /// Optional reason string for `available: false` rows. E.g.
+    /// "v0.9" (Gemini), "Re-authenticate via `codex login`",
+    /// "Codex SDK not provisioned — Toggle in Settings".
+    public let reason: String?
+
+    public init(
+        provider: AgentKind,
+        codexBackend: CodexChatBackend? = nil,
+        available: Bool,
+        authenticated: Bool,
+        capabilityProbePassed: Bool,
+        lastProbedAt: Date? = nil,
+        reason: String? = nil
+    ) {
+        self.provider = provider
+        self.codexBackend = codexBackend
+        self.available = available
+        self.authenticated = authenticated
+        self.capabilityProbePassed = capabilityProbePassed
+        self.lastProbedAt = lastProbedAt
+        self.reason = reason
     }
 }
