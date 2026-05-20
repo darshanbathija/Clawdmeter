@@ -27,18 +27,22 @@ struct ClawdmeteriOSApp: App {
             // instance in ContentView shares UserDefaults state.
             let client = AgentControlClient()
             let manager = iOSNotificationManager(client: client)
+            // Codex fix to P2-iOS-6: iOS treats double setTaskCompleted
+            // as a lifecycle violation (warning at best, crash at worst).
+            // The earlier patch had a race: expirationHandler called
+            // setTaskCompleted(false), but the still-running refreshTask
+            // could then complete normally and call setTaskCompleted(ok)
+            // a second time. Wrap the call in a single-shot guard so
+            // only the first caller wins.
+            let completionGuard = BGTaskCompletionGuard()
             let refreshTask = Task { @MainActor in
                 let ok = await manager.performRefresh()
                 manager.scheduleBackgroundRefresh()
-                task.setTaskCompleted(success: ok)
+                completionGuard.complete(task: task, success: ok)
             }
-            // P2-iOS-6: iOS will hard-kill the app if the BG task runs
-            // past its budget without responding to the expiration signal.
-            // Cancel the in-flight refresh and report failure so the task
-            // completes cleanly within the deadline.
             task.expirationHandler = {
                 refreshTask.cancel()
-                task.setTaskCompleted(success: false)
+                completionGuard.complete(task: task, success: false)
             }
         }
     }
@@ -54,5 +58,23 @@ struct ClawdmeteriOSApp: App {
                 // drive things.
                 .preferredColorScheme(appearance.colorScheme)
         }
+    }
+}
+
+/// Single-shot guard so the BGTask expirationHandler and the in-flight
+/// refresh Task can both attempt to complete the task without iOS
+/// flagging a double-complete. The first caller wins; subsequent calls
+/// are no-ops.
+private final class BGTaskCompletionGuard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func complete(task: BGTask, success: Bool) {
+        lock.lock()
+        let firstCall = !completed
+        completed = true
+        lock.unlock()
+        guard firstCall else { return }
+        task.setTaskCompleted(success: success)
     }
 }
