@@ -116,10 +116,12 @@ struct iOSArtifactsPane: View {
 
     private func open(_ entry: ArtifactEntry) async {
         guard downloading == nil else { return }
-        // P2-iOS-7: reject any path that contains a `..` traversal segment
-        // or starts with `/` — the daemon should also enforce this, but
-        // keeping the client honest blocks the obvious attack from a
-        // compromised artifact list before it leaves the device.
+        // P2-iOS-7 (refined after Codex review): refuse any artifact path
+        // that contains a `..` traversal segment. ArtifactEntry.path
+        // is documented as storing absolute paths (it comes from the
+        // agent's `Write` tool input via SessionChatStore.ChatItemBuilder),
+        // so rejecting `/`-prefixed paths broke every real download.
+        // Daemon-side sandbox validation is the actual defense.
         guard Self.isSafeArtifactPath(entry.path) else {
             self.error = "Refusing to fetch unsafe artifact path: \(entry.path)"
             return
@@ -136,12 +138,12 @@ struct iOSArtifactsPane: View {
         }
     }
 
-    /// Reject paths that try to escape the session's artifact root.
-    /// Absolute paths (`/etc/passwd`) and any segment equal to `..` or
-    /// `.` are refused. Empty paths are also refused.
+    /// Reject paths with traversal segments. Empty paths are also refused.
+    /// Absolute paths are allowed because the agent's tool inputs (Write,
+    /// etc.) routinely produce them; the daemon-side sandbox is the actual
+    /// defense against escaping the workspace.
     static func isSafeArtifactPath(_ path: String) -> Bool {
         guard !path.isEmpty else { return false }
-        if path.hasPrefix("/") { return false }
         for segment in path.split(separator: "/") {
             if segment == ".." || segment == "." { return false }
         }
