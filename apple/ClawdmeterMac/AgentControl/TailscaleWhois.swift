@@ -52,6 +52,19 @@ public actor TailscaleWhois {
         return login
     }
 
+    /// Strip the port from an NWEndpoint string and return just the IP.
+    /// Handles three shapes:
+    /// - bracketed IPv6:  `[fd7a::1]:443`  → `fd7a::1`
+    /// - IPv4 + port:     `100.64.0.1:443` → `100.64.0.1`
+    /// - bare host:       `fd7a::1`        → `fd7a::1`
+    ///
+    /// P2-Mac-4: previously, an unbracketed IPv6 endpoint with a port
+    /// (e.g., `fd7a::1:443` — emitted by some NWEndpoint string
+    /// formatters) fell through both branches and returned the raw
+    /// string with the trailing `:443` still attached. `tailscale whois`
+    /// then 404'd. Detect the colon-rich IPv6 shape explicitly: if the
+    /// string contains 3+ colons it's IPv6, and the final colon is the
+    /// port boundary IFF the segment after it parses as a port.
     static func ipOnly(_ peerAddress: String) -> String {
         if peerAddress.hasPrefix("["),
            let end = peerAddress.firstIndex(of: "]") {
@@ -60,6 +73,15 @@ public actor TailscaleWhois {
         let colonCount = peerAddress.filter { $0 == ":" }.count
         if colonCount == 1 {
             return peerAddress.split(separator: ":").first.map(String.init) ?? peerAddress
+        }
+        // 3+ colons → IPv6. The trailing `:NNNN` (numeric, ≤ 5 digits) is a
+        // port. Anything else is part of the address.
+        if colonCount >= 3,
+           let lastColon = peerAddress.lastIndex(of: ":") {
+            let tail = peerAddress[peerAddress.index(after: lastColon)...]
+            if !tail.isEmpty, tail.count <= 5, tail.allSatisfy({ $0.isNumber }) {
+                return String(peerAddress[..<lastColon])
+            }
         }
         return peerAddress
     }
