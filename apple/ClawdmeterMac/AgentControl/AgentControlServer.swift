@@ -1516,12 +1516,54 @@ public final class AgentControlServer {
             return
         }
         let url = URL(fileURLWithPath: resolved)
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: resolved),
-              let size = attrs[.size] as? Int,
-              size <= 50_000_000 else {
+        // v0.7.4 TOCTOU fix: validate-then-read had a window where an
+        // agent with worktree write could swap the post-validate path
+        // for a symlink before `Data(contentsOf:)` followed it. Use
+        // POSIX `open(O_RDONLY | O_NOFOLLOW)` so any symlink at the
+        // final component fails immediately, then `fstat` the live fd
+        // to enforce the 50MB cap on the file we ACTUALLY have open.
+        // This means the size check + read both operate on the same
+        // inode — no race window.
+        let fd = open(resolved, O_RDONLY | O_NOFOLLOW)
+        guard fd >= 0 else {
+            // ELOOP (symlink at final component) → 403, anything else → 404.
+            let code = errno == ELOOP ? 403 : 404
+            let reason = errno == ELOOP ? "Forbidden" : "Not Found"
+            let body = errno == ELOOP
+                ? "symlink at artifact path is not allowed\n"
+                : "artifact not found\n"
+            sendResponse(HTTPResponse(
+                status: code, reason: reason,
+                contentType: "text/plain",
+                body: Data(body.utf8)
+            ), on: connection)
+            return
+        }
+        defer { close(fd) }
+        var st = stat()
+        guard fstat(fd, &st) == 0 else {
+            sendResponse(.internalError, on: connection); return
+        }
+        // Require a regular file. fstat after open(NOFOLLOW) means S_IFLNK
+        // never appears here, but reject anything that's not a regular file
+        // (dirs, fifos, devices) defensively.
+        guard (st.st_mode & S_IFMT) == S_IFREG else {
+            sendResponse(HTTPResponse(
+                status: 403, reason: "Forbidden",
+                contentType: "text/plain",
+                body: Data("artifact path is not a regular file\n".utf8)
+            ), on: connection)
+            return
+        }
+        let size = Int(st.st_size)
+        guard size <= 50_000_000 else {
             sendResponse(.notFound, on: connection); return
         }
-        guard let data = try? Data(contentsOf: url) else {
+        // Read the open fd. FileHandle takes ownership of closing, so
+        // pass `closeOnDealloc: false` and let our `defer { close(fd) }`
+        // win — double-close on a Foundation FileHandle is undefined.
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+        guard let data = try? handle.readToEnd() else {
             sendResponse(.internalError, on: connection); return
         }
         sendResponse(.ok(contentType: contentType(for: url), body: data), on: connection)
