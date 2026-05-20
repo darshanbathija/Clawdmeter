@@ -508,6 +508,23 @@ public final class AgentControlServer {
             )
             wsChannels[ObjectIdentifier(connection)] = chatChannel
             chatChannel.start()
+        case "codex-stream-subscribe":
+            // v0.7.3: subscribe to per-session CodexSubscriptionRelay
+            // event stream. Multi-subscriber via PassthroughSubject.
+            guard let sessionIdString = envelope.sessionId,
+                  let sessionId = UUID(uuidString: sessionIdString),
+                  let session = registry.session(id: sessionId)
+            else {
+                sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
+                return
+            }
+            let codexChannel = CodexStreamWebSocketChannel(
+                connection: connection,
+                session: session,
+                relay: CodexSubscriptionRelay.shared
+            )
+            wsChannels[ObjectIdentifier(connection)] = codexChannel
+            codexChannel.start()
         default:
             sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
         }

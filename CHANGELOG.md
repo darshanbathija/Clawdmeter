@@ -4,6 +4,89 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.3 build 49] - 2026-05-20
+
+Codex SDK events end-to-end into iOS chat. v0.7.2 shipped the relay
++ Settings UI + X1 wire; v0.7.3 wires the actual streaming + chat
+integration: multi-subscriber relay, new `codex-stream-subscribe` WS
+op, SessionChatStore ingestor, iOS inline handoff sheet. Wire stays
+at v8 — the new WS op is part of the v8 Codex SDK feature surface
+gated by `supportsCodexSDK`.
+
+### Multi-subscriber relay + codex-stream-subscribe WS op
+
+`CodexSubscriptionRelay` refactored AsyncStream → Combine
+PassthroughSubject. Multiple subscribers per session — chat-subscribe
+ingestor, WS bridge, and Mac inspectors all observe the same event
+flow without duplicating the sidecar. `subscribe(sessionId:)` returns
+a Publisher; subscribers attached before `ensureRunning` are held in
+a pending subject and promoted when the sidecar starts.
+
+`CodexStreamWebSocketChannel` mirrors `ChatStreamWebSocketChannel`:
+greeting frame (`{type:"subscribed",sessionId,sdkProvisioned,
+sdkModeActive}`) then a `{type:"codex-relay-event",kind,...,raw}`
+frame per SDK event. AgentControlServer registers the new
+`codex-stream-subscribe` WS op alongside `chat-subscribe`.
+
+### SDK events → SessionChatStore ChatItem
+
+`CodexSDKEventIngestor` subscribes to the relay's PassthroughSubject
+and feeds SDK events into `SessionChatStore` as synthesized
+ChatMessage records. The chat-subscribe WS pipeline then carries
+them to iOS through the existing WireChatSnapshot path — no new
+client surface required for the basic case.
+
+Mapping:
+  • `agent_message` → .assistantText "Codex"
+  • `reasoning` → .meta "thinking"
+  • `command_execution` → .toolCall "bash" + .toolResult bash exit
+  • `file_change` → .toolCall "edit" (path/kind list)
+  • `mcp_tool_call` → .toolCall "<server>/<tool>"
+  • `web_search` → .toolCall "web_search" + query
+  • `todo_list` → .meta "todo" (checked-state list)
+  • `error` → .meta "Codex error" (isError: true)
+  • `turn.completed.usage` → meta "tokens" anchor + bumps
+    deltaInput/Output/CacheRead so WireChatSnapshot totals update
+  • `turn.failed` → .meta "Turn failed" (isError: true)
+  • control-flow events (thread.started, turn.started, stream_*,
+    observer_ready, unknown) → no chat append
+
+`SessionChatStore.appendSDKMessages(_:at:deltaInputTokens:...)` is
+the new public hook. Synthesizes a ParsedLine and feeds the
+StagingParser the same way JSONL-derived lines do; tokens flow
+through delta accumulators automatically.
+
+### iOS inline handoff for .deliveredWithCodexResume
+
+Open-on-Mac for a Codex thread previously dismissed silently when
+the Mac executed a resume. v0.7.3 surfaces the response inline via
+`CodexResumeResultSheet` — a full-screen sheet showing:
+  - "Codex responded" header with sparkle SF Symbol
+  - threadId in monospaced caption (text-selectable)
+  - The agent's finalResponse in full body text
+  - "Done" toolbar button to dismiss
+  - "Continue on Mac" toolbar button opens `clawdmeter://session?
+    threadId=<id>` URL scheme so the user can pick up on the Mac
+
+`NewSessionSheet`'s post-result handler stores the resume tuple in
+@State and presents the sheet; onDismiss closes both the result
+sheet AND the outer New Session sheet (the user has seen the
+response — no need to keep the form open).
+
+### Deferred to v0.7.4
+
+- Daemon-side `relay.ensureRunning()` integration with
+  `/sessions/:id/send` — currently the relay is built but not yet
+  wired into the agent send flow; the handlers in v0.7.4 will call
+  `CodexSubscriptionRelay.shared.ensureRunning()` when a Codex
+  session in SDK mode receives a new prompt
+- Per-session `CodexSDKEventIngestor` spawned automatically by the
+  session lifecycle (currently the ingestor exists but needs to
+  be instantiated alongside SessionChatStore creation)
+- iOS WS client for `codex-stream-subscribe` (current path uses the
+  chat-subscribe pipeline via SessionChatStore ingestor — the WS op
+  is daemon-side ready but no iOS client subscribes to it yet)
+
 ## [0.7.2 build 48] - 2026-05-20
 
 Codex SDK observation — the user-visible glue. v0.7.0 shipped

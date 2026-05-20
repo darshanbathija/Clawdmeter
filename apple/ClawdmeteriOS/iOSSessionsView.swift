@@ -1544,6 +1544,10 @@ private struct NewSessionSheet: View {
     @State private var runAsABPair: Bool = false
     @State private var isStarting: Bool = false
     @State private var openOnMacUnsupportedAlert: String?
+    /// v0.7.3: when Open-on-Mac returns .deliveredWithCodexResume,
+    /// surface the response inline as a sheet instead of dismissing
+    /// silently. (threadId, finalResponse text)
+    @State private var codexResumeResult: (threadId: String, response: String)?
     /// Phase 8: pre-flight cost + weekly-cap estimate. Refreshes when
     /// any input the daemon would care about changes (repo, agent,
     /// model, effort, goal length). Debounced via the .task(id:) below.
@@ -1769,15 +1773,66 @@ private struct NewSessionSheet: View {
                 switch result {
                 case .delivered:
                     isPresented = false
-                case .deliveredWithCodexResume:
-                    // v0.7.2: the Mac executed a Codex SDK resume on the
-                    // draft's codexThreadId. Close the sheet — the Mac's
-                    // composer will render the agent's response inline.
-                    isPresented = false
+                case .deliveredWithCodexResume(let threadId, let response):
+                    // v0.7.3: surface the resumed thread's response
+                    // inline. The sheet replaces the prior silent
+                    // dismiss so the user sees the agent's reply on
+                    // iOS without context-switching to the Mac.
+                    codexResumeResult = (threadId: threadId, response: response)
                 case .macUnsupported(let v):
                     openOnMacUnsupportedAlert = "Your Mac is on wire version \(v); Open on Mac needs ≥\(AgentControlWireVersion.composeDraftMinimum). Update Clawdmeter on the Mac."
                 case .failed(let msg):
                     openOnMacUnsupportedAlert = msg
+                }
+            }
+        }
+    }
+}
+
+/// v0.7.3: presents the result of a Codex SDK thread resume launched
+/// via Open-on-Mac. Shows the agent's response inline + offers a
+/// "Continue on Mac" deep-link.
+private struct CodexResumeResultSheet: View {
+    let threadId: String
+    let response: String
+    let onDismiss: () -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label("Codex responded", systemImage: "sparkle")
+                        .font(.headline)
+                        .foregroundStyle(.tint)
+                    Text(threadId)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Divider()
+                    Text(response)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding()
+            }
+            .navigationTitle("Open on Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onDismiss)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        if let url = URL(string: "clawdmeter://session?threadId=\(threadId)") {
+                            openURL(url)
+                        }
+                        onDismiss()
+                    } label: {
+                        Label("Continue on Mac", systemImage: "arrow.up.right.square")
+                    }
                 }
             }
         }
