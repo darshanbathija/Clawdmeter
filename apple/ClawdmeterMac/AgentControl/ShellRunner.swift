@@ -84,6 +84,26 @@ public actor ShellRunner {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
+        // Codex fix: set terminationHandler BEFORE `run()`. For very
+        // short-lived commands (`true`, `which`, small git probes) the
+        // child can exit between `process.run()` and a later handler
+        // assignment, in which case the handler never fires, the
+        // timeout Task observes `!process.isRunning` and returns
+        // without resuming the continuation, and `ShellRunner.run`
+        // hangs forever. Wire `resumed`/handler now so the slot is
+        // armed before the process is even alive.
+        let resumed = ResumeOnce()
+        // The continuation reference is filled in below via the
+        // box; the terminationHandler closure captures the box so
+        // it can resume whichever continuation withCheckedContinuation
+        // installs in a moment.
+        let continuationBox = ContinuationBox()
+        process.terminationHandler = { _ in
+            if resumed.fire() {
+                continuationBox.continuation?.resume(returning: true)
+            }
+        }
+
         do {
             try process.run()
         } catch {
@@ -108,27 +128,28 @@ public actor ShellRunner {
             errDone.signal()
         }
 
-        // P2-Shared-2 + Codex structured P2: wait via terminationHandler
-        // + a racing timeout Task instead of a 50ms poll. The earlier
-        // patch added a bare `Task { ... }` for the timeout race, which
-        // is unstructured and does NOT inherit the caller's cancellation.
-        // If the caller's Task was cancelled mid-shell-out, the child
-        // process kept running until the deadline expired (regressing
-        // the previous explicit cancellation behavior).
+        // P2-Shared-2 + Codex structured: wait via terminationHandler
+        // (set above, BEFORE `run()`) + a racing timeout Task. Caller
+        // cancellation is bridged through `withTaskCancellationHandler`;
+        // the onCancel closure terminates the process synchronously,
+        // which fires the terminationHandler set above, which resumes
+        // the continuation. The post-await `if Task.isCancelled`
+        // block converts this into a thrown CancellationError.
         //
-        // Bridge caller cancellation through `withTaskCancellationHandler`:
-        // the onCancel closure terminates the process synchronously when
-        // the calling Task is cancelled. terminate() triggers the
-        // terminationHandler, which resumes the continuation with `true`.
-        // We then detect cancellation by checking Task.isCancelled
-        // after the await and throw CancellationError below.
-        let resumed = ResumeOnce()
+        // If the child has already exited before this `await`
+        // (very short-lived commands like `true`), resume immediately
+        // — the terminationHandler may have fired before continuationBox
+        // had a continuation to deliver to, but the `process.isRunning`
+        // poll below catches it.
         let exitedNormally: Bool = await withTaskCancellationHandler {
             await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                // `terminationHandler` runs on a background queue exactly
-                // once when the process is reaped.
-                process.terminationHandler = { _ in
-                    if resumed.fire() { cont.resume(returning: true) }
+                continuationBox.continuation = cont
+                // If the child already terminated between run() and
+                // here (handler fired with a nil continuation), resume
+                // now ourselves so we don't hang.
+                if !process.isRunning, resumed.fire() {
+                    cont.resume(returning: true)
+                    return
                 }
                 // Timeout race only — caller cancellation is delivered
                 // through the outer onCancel below.
@@ -139,7 +160,12 @@ public actor ShellRunner {
                     // sub-second `timeout` values still work.
                     let deadline = ContinuousClock.now + .milliseconds(Int(timeout * 1000))
                     while ContinuousClock.now < deadline {
-                        if !process.isRunning { return }
+                        if !process.isRunning {
+                            // Child finished but handler may have raced
+                            // us — resume only if we won the race.
+                            if resumed.fire() { cont.resume(returning: true) }
+                            return
+                        }
                         try? await Task.sleep(for: .milliseconds(200))
                     }
                     if process.isRunning, resumed.fire() {
@@ -299,4 +325,14 @@ private final class ResumeOnce: @unchecked Sendable {
         fired = true
         return true
     }
+}
+
+/// Holds the continuation reference so the terminationHandler (set
+/// before `process.run()` to avoid the fast-exit hang) can resume
+/// whichever continuation withCheckedContinuation produces a moment
+/// later. Access is single-writer (the body closure assigns once),
+/// single-reader (the handler reads once), so a plain class with
+/// implicit nil-init suffices.
+private final class ContinuationBox: @unchecked Sendable {
+    var continuation: CheckedContinuation<Bool, Never>?
 }

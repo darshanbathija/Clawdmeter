@@ -530,6 +530,14 @@
 			path = ClawdmeterMac;
 			sourceTree = "<group>";
 		};
+		4905C6BF86DFAD847D75C5FB /* node */ = {
+			isa = PBXGroup;
+			children = (
+				76E0087C6C5DC925C3C90F6C /* bin */,
+			);
+			path = node;
+			sourceTree = "<group>";
+		};
 		4A0FA6AC91AE9DE6B4FF45C4 /* Composer */ = {
 			isa = PBXGroup;
 			children = (
@@ -545,6 +553,14 @@
 				60C622DD99169A6ABCBC6F8C /* UsageStatusChip.swift */,
 			);
 			path = Composer;
+			sourceTree = "<group>";
+		};
+		4A2AC387B85935274B6855C9 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				4905C6BF86DFAD847D75C5FB /* node */,
+			);
+			path = Vendor;
 			sourceTree = "<group>";
 		};
 		545B0518B5EA26E2242B825F /* ClawdmeterMacWidgets */ = {
@@ -576,6 +592,13 @@
 				4A0FA6AC91AE9DE6B4FF45C4 /* Composer */,
 			);
 			path = Workspace;
+			sourceTree = "<group>";
+		};
+		76E0087C6C5DC925C3C90F6C /* bin */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = bin;
 			sourceTree = "<group>";
 		};
 		8355AE2A6C5D497C97998BEB = {
@@ -669,6 +692,7 @@
 				989678078117646A9327BB0B /* ClaudeLogo.svg */,
 				41B60D6E8F440791CA97B015 /* CodexLogo.png */,
 				61DCEB1020CBB0E324C60959 /* GeminiLogo.svg */,
+				4A2AC387B85935274B6855C9 /* Vendor */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
