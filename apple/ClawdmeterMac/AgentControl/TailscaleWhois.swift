@@ -58,13 +58,20 @@ public actor TailscaleWhois {
     /// - IPv4 + port:     `100.64.0.1:443` → `100.64.0.1`
     /// - bare host:       `fd7a::1`        → `fd7a::1`
     ///
-    /// P2-Mac-4: previously, an unbracketed IPv6 endpoint with a port
-    /// (e.g., `fd7a::1:443` — emitted by some NWEndpoint string
-    /// formatters) fell through both branches and returned the raw
-    /// string with the trailing `:443` still attached. `tailscale whois`
-    /// then 404'd. Detect the colon-rich IPv6 shape explicitly: if the
-    /// string contains 3+ colons it's IPv6, and the final colon is the
-    /// port boundary IFF the segment after it parses as a port.
+    /// **Codex fix (rolling back overreach):** an earlier P2-Mac-4
+    /// patch tried to also handle the unbracketed `fd7a::1:443` shape by
+    /// stripping any numeric tail ≤ 5 digits after the last `:`. That
+    /// broke bare IPv6 addresses like `fd7a:115c:a1e0::1` where the
+    /// final hextet IS numeric and IS the address, not a port — the
+    /// heuristic returned `fd7a:115c:a1e0::` and `tailscale whois` then
+    /// failed closed.
+    ///
+    /// IPv6-with-implicit-port is inherently ambiguous; callers that
+    /// need that shape MUST bracket the address per RFC 3986 (which the
+    /// NWEndpoint string formatters do for connections from the iOS
+    /// pairing flow). Bare unbracketed IPv6+port addresses pass through
+    /// here unchanged — whois will fail, the lookup will be cached as
+    /// "unknown", and that's the worst that happens.
     static func ipOnly(_ peerAddress: String) -> String {
         if peerAddress.hasPrefix("["),
            let end = peerAddress.firstIndex(of: "]") {
@@ -73,15 +80,6 @@ public actor TailscaleWhois {
         let colonCount = peerAddress.filter { $0 == ":" }.count
         if colonCount == 1 {
             return peerAddress.split(separator: ":").first.map(String.init) ?? peerAddress
-        }
-        // 3+ colons → IPv6. The trailing `:NNNN` (numeric, ≤ 5 digits) is a
-        // port. Anything else is part of the address.
-        if colonCount >= 3,
-           let lastColon = peerAddress.lastIndex(of: ":") {
-            let tail = peerAddress[peerAddress.index(after: lastColon)...]
-            if !tail.isEmpty, tail.count <= 5, tail.allSatisfy({ $0.isNumber }) {
-                return String(peerAddress[..<lastColon])
-            }
         }
         return peerAddress
     }
