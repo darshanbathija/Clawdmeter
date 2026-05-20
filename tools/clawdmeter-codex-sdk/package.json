@@ -1,0 +1,20 @@
+{
+  "name": "clawdmeter-codex-sdk",
+  "version": "0.7.0",
+  "description": "Node sidecar for Clawdmeter Codex SDK observation mode",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "main.mjs",
+  "scripts": {
+    "test": "node --test tests/main.test.mjs"
+  },
+  "dependencies": {
+    "_comment": "v0.7.0 ships skeletons only — full impl in v0.7.1. When provisioning lands, uncomment the SDK dependency below and CodexSDKManager will run `npm install` on first toggle ON."
+  },
+  "_pending_dependencies": {
+    "@openai/codex-sdk": "^0.1.0"
+  }
+}
