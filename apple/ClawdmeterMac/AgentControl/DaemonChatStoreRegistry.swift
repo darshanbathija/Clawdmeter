@@ -208,10 +208,17 @@ public final class DaemonChatStoreRegistry {
     // MARK: - Internals
 
     private func createStore(for session: AgentSession) -> SessionChatStore? {
-        // v0.8 Phase 4.5 / NEW-E3: SDK chat sessions have no JSONL file
-        // — events arrive via CodexSDKEventIngestor.appendSDKMessages.
-        // Use the SDK-only init that skips JSONLTail entirely.
-        if session.kind == .chat && session.agent == .codex && session.codexChatBackend == .sdk {
+        // v0.8 chat sessions: ALL kinds (.chat) use the sdkOnly store —
+        // not just Codex SDK chat. Reason: SessionChatStore.resolveSessionFileURL
+        // walks UP parent dirs looking for a matching ~/.claude/projects/<encoded>
+        // dir, and the chat-cwd's home-dir ancestor (~/.claude/projects/-Users-darshanbathija-1)
+        // can exist with unrelated JSONLs — the resolver would pick the newest
+        // of those, surfacing someone else's debugging session as if it were
+        // this chat's transcript. The sdkOnly init skips JSONLTail entirely
+        // (NEW-E3 from plan); SDK chat populates via CodexSDKEventIngestor,
+        // CLI chat in v0.8 ships with no transcript rendering (acceptable
+        // for v0.8 ship, polished in v0.8.x).
+        if session.kind == .chat {
             let store = SessionChatStore(sessionId: session.id, sdkOnly: true)
             store.start()
             return store
