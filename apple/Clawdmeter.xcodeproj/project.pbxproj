@@ -28,6 +28,7 @@
 		23D6E3DB6CFE748F738370BA /* RateLimiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925041B8C85D144E1647A0E6 /* RateLimiter.swift */; };
 		24E325DA62B4416257C7CDA4 /* ClawdmeterWatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 44F439E06FC6F2C86BB0E8A9 /* ClawdmeterWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		27C2A460552540D763364D8C /* WatchPlanBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = E37960317F2D69E2E52475CD /* WatchPlanBridge.swift */; };
+		28A1CFB61C4869AAF6A3DFC1 /* CodexSubscriptionRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0013A446A095792287595D9 /* CodexSubscriptionRelay.swift */; };
 		29AF2BC82FD6FA5660BA400E /* TerminalWebSocketChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131AD66B762768C8E5DD2D57 /* TerminalWebSocketChannel.swift */; };
 		2D588D81AD9E412BEC30D021 /* iOSEffortDial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D867718395AF24B03981F5 /* iOSEffortDial.swift */; };
 		2E1FDDADA0F1DD7F0907C66F /* iOSModelEffortPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 717807F26A96613EF8C57F1C /* iOSModelEffortPill.swift */; };
@@ -346,6 +347,7 @@
 		DC56D7440BE0E567075D87F5 /* ChatStreamWebSocketChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStreamWebSocketChannel.swift; sourceTree = "<group>"; };
 		DDE036C3B197F45A234547AD /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		DE0C409B82A2CE3CC4741248 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		E0013A446A095792287595D9 /* CodexSubscriptionRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSubscriptionRelay.swift; sourceTree = "<group>"; };
 		E2672EC5D93791232630202C /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
 		E37960317F2D69E2E52475CD /* WatchPlanBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPlanBridge.swift; sourceTree = "<group>"; };
 		E6168C5A5642A5E8A8A0DC87 /* iOSSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSSessionsView.swift; sourceTree = "<group>"; };
@@ -433,6 +435,7 @@
 				A5239318D643E1B51443A7C3 /* AutopilotState.swift */,
 				DC56D7440BE0E567075D87F5 /* ChatStreamWebSocketChannel.swift */,
 				A99393EFDDEECF67D62E5E4C /* CodexSDKManager.swift */,
+				E0013A446A095792287595D9 /* CodexSubscriptionRelay.swift */,
 				23BA2D80741F5E8B24ACEA51 /* ControlModeFrame.swift */,
 				A965446683135119981D9C40 /* ControlModeParser.swift */,
 				96C2DF0BC33E8B4A3197CFDD /* DaemonChatStoreRegistry.swift */,
@@ -1015,6 +1018,7 @@
 				1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */,
 				584179F5CEEFB2FF845669B7 /* CodexSDKManager.swift in Sources */,
 				E4639C4A18DB98EEEA3FE15D /* CodexSDKSettingsView.swift in Sources */,
+				28A1CFB61C4869AAF6A3DFC1 /* CodexSubscriptionRelay.swift in Sources */,
 				536D0374AE837765530A760E /* CommandPalette.swift in Sources */,
 				3E4ECC9D7E017C2E27E605F5 /* ComposerInputCore.swift in Sources */,
 				8ABD7420F16C440E13AA36DF /* ControlModeFrame.swift in Sources */,
