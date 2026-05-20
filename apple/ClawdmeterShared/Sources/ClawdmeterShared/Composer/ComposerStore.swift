@@ -188,6 +188,39 @@ public final class ComposerStore: ObservableObject {
             self.planMode = planMode
         }
         public static let `default` = ChipDefaults()
+
+        /// v0.7.10: per-agent default model + effort. Sourced from
+        /// `ModelCatalog.bundled` so the catalog stays the single
+        /// source of truth — the first entry per agent's `gemini` /
+        /// `codex` / `claude` slice is the default. Effort is cleared
+        /// for models whose `supportsEffort` is false (Gemini today).
+        public static func `for`(agent: AgentKind, catalog: ModelCatalog = .bundled) -> ChipDefaults {
+            let entry: ModelCatalogEntry?
+            switch agent {
+            case .claude: entry = catalog.claude.first
+            case .codex:  entry = catalog.codex.first
+            case .gemini: entry = catalog.gemini.first
+            }
+            let effort: ReasoningEffort? = (entry?.supportsEffort ?? false) ? .max : nil
+            return ChipDefaults(
+                agent: agent,
+                modelId: entry?.id,
+                effort: effort,
+                mode: .worktree,
+                planMode: false
+            )
+        }
+    }
+
+    /// v0.7.10: flip composer chips to the picked agent's defaults.
+    /// Called when the user toggles the agent picker in the composer —
+    /// the model chip + effort dial reset so the user doesn't end up
+    /// shipping a Codex turn to Gemini.
+    public func resetChipsForAgent(_ agent: AgentKind) {
+        let defaults = ChipDefaults.for(agent: agent)
+        self.agent = agent
+        self.modelId = defaults.modelId
+        self.effort = defaults.effort
     }
 
     // MARK: - Output rendering

@@ -237,7 +237,18 @@ struct ComposerInputCore: View {
                 // the primary checkout.
                 EmptyView()
             case .emptyState:
-                Picker("Agent", selection: $store.agent) {
+                // v0.7.10: agent toggle resets the model + effort to
+                // the picked agent's defaults so the chip below the
+                // composer (`Opus 4.7 (1M) · Max` etc.) reflects the
+                // active agent instead of stale Claude defaults when
+                // the user switches to Codex / Gemini.
+                Picker("Agent", selection: Binding(
+                    get: { store.agent },
+                    set: { newAgent in
+                        guard newAgent != store.agent else { return }
+                        store.resetChipsForAgent(newAgent)
+                    }
+                )) {
                     Text("Claude").tag(AgentKind.claude)
                     Text("Codex").tag(AgentKind.codex)
                     Text("Gemini").tag(AgentKind.gemini)

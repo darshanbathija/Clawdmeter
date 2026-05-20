@@ -4,6 +4,29 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.10 build 56] - 2026-05-21
+
+### Fixed
+
+- **Composer agent toggle now resets the model + effort chip.**
+  Switching from Claude → Codex → Gemini in the empty-state composer
+  was leaving the model chip on "Opus 4.7 (1M) · Max" no matter the
+  pick. The chip now flips to each agent's default — Codex →
+  GPT-5.5 · Max, Gemini → Gemini 3.5 Flash (effort hidden, since
+  Gemini doesn't support per-call effort). Same fix applied to the
+  iOS New Session sheet's agent picker, which used to leave the
+  model picker on a stale id when the user toggled agents.
+
+### Added
+
+- **`ComposerStore.ChipDefaults.for(agent:catalog:)`** — sources the
+  default model from the first entry per agent's catalog slice, so
+  the catalog stays the single source of truth. Effort clears when
+  the picked model's `supportsEffort` is false.
+- **`ComposerStore.resetChipsForAgent(_:)`** — bound to the
+  composer's agent Picker. One call flips agent + modelId + effort
+  to the new defaults atomically.
+
 ## [0.7.9 build 55] - 2026-05-21
 
 Worktree-by-default + city-named branches.

@@ -1602,9 +1602,25 @@ private struct NewSessionSheet: View {
                 }
 
                 Section("Agent") {
-                    Picker("Agent", selection: $agent) {
+                    // v0.7.10: agent toggle resets model + effort to
+                    // the picked agent's defaults so the model picker
+                    // below doesn't sit on a stale Claude id when the
+                    // user flips to Codex / Gemini.
+                    Picker("Agent", selection: Binding(
+                        get: { agent },
+                        set: { newAgent in
+                            guard newAgent != agent else { return }
+                            let defaults = ComposerStore.ChipDefaults.for(
+                                agent: newAgent, catalog: client.modelCatalog
+                            )
+                            agent = newAgent
+                            modelId = defaults.modelId
+                            effort = defaults.effort ?? .medium
+                        }
+                    )) {
                         Text("Claude").tag(AgentKind.claude)
                         Text("Codex").tag(AgentKind.codex)
+                        Text("Gemini").tag(AgentKind.gemini)
                     }
                     .pickerStyle(.segmented)
 
