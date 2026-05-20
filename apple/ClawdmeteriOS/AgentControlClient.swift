@@ -581,6 +581,65 @@ public final class AgentControlClient: ObservableObject {
         }
     }
 
+    // MARK: - v0.8 Chat tab
+
+    /// `POST /chat-sessions` — spawn a new chat-kind AgentSession. Gemini
+    /// returns 501 in v0.8 (deferred to v0.9 alongside Antigravity-via-agy);
+    /// the daemon error surfaces through `lastError` and `nil` return.
+    @MainActor
+    public func createChatSession(
+        provider: AgentKind,
+        model: String? = nil,
+        codexBackend: CodexChatBackend? = nil,
+        effort: ReasoningEffort? = nil
+    ) async -> AgentSession? {
+        let req = CreateChatSessionRequest(
+            provider: provider,
+            model: model,
+            effort: effort,
+            codexChatBackend: codexBackend
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let body = try? encoder.encode(req),
+              let request = makeRequest(path: "/chat-sessions", method: "POST", body: body) else {
+            return nil
+        }
+        do {
+            let data = try await sendChecked(request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let session = try decoder.decode(AgentSession.self, from: data)
+            sessions.append(session)
+            return session
+        } catch {
+            self.lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// `GET /chat-providers` — capability matrix (per provider + Codex
+    /// backend sub-rows). Used by the Chat sidebar to gray disabled rows.
+    @MainActor
+    public func fetchChatProviders() async -> ChatProvidersResponse? {
+        guard let request = makeRequest(path: "/chat-providers", method: "GET") else { return nil }
+        do {
+            let data = try await sendChecked(request)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ChatProvidersResponse.self, from: data)
+        } catch {
+            self.lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Subset of `sessions` filtered to chat sessions (kind=.chat). Used
+    /// by the Chat tab sidebar; the Code tab uses the inverse filter.
+    public var chatSessions: [AgentSession] {
+        sessions.filter { $0.kind == .chat && $0.archivedAt == nil }
+    }
+
     @MainActor
     public func approvePlan(sessionId: UUID) async {
         guard let request = makeRequest(path: "/sessions/\(sessionId.uuidString)/approve-plan", method: "POST") else { return }

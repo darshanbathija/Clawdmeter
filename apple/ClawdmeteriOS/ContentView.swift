@@ -1,9 +1,10 @@
 import SwiftUI
 import ClawdmeterShared
 
-/// Root iOS tab container. v0.8 nav reshuffle: Live tab dissolved into the
-/// Analytics tab's header (`LiveGaugesHeader`); Sessions renamed to Code.
-/// Chat tab lands in Phase 5 of the v0.8 build.
+/// Root iOS tab container. v0.8 nav reshuffle: Live tab dissolved into
+/// Analytics tab's header (`LiveGaugesHeader`); Sessions renamed to Code;
+/// Chat tab added as the first tab (Phase 5 of v0.8). Order: Chat /
+/// Analytics / Code, matching the plan.
 struct ContentView: View {
     @ObservedObject var model: UsageModel
     @StateObject private var agentClient = AgentControlClient()
@@ -22,6 +23,11 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
+            iOSChatView(client: agentClient)
+                .tabItem {
+                    Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                }
+
             iOSAnalyticsView(model: model, agentClient: agentClient, showingSettings: $showingSettings)
                 .tabItem {
                     Label("Analytics", systemImage: "chart.bar")
