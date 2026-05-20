@@ -39,23 +39,35 @@ struct PermissionModeChip: View {
             }
         } label: {
             // v0.7.13: chip styled identically to ModelEffortChip — same
-            // Capsule background (Color.secondary.opacity(0.10)), same
-            // 11pt-medium label + 8pt chevron, same padding. The icon +
-            // mode-specific tint are dropped because the popover already
-            // carries the active mode (checkmark on the row), and visual
-            // weight should match the right-side model/effort chip so
-            // the bottom bar feels balanced instead of chip-soup.
+            // Capsule background, same 11pt-medium label + 8pt chevron,
+            // same padding.
+            // v0.7.15: bypass is destructive (no permission prompts —
+            // agent has carte blanche), so it gets a yellow accent ring
+            // + bold label. Plan/Edits/Ask stay neutral-grey to match
+            // the right-side model chip.
             HStack(spacing: 6) {
                 Text(mode.shortLabel)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 11, weight: mode == .bypass ? .semibold : .medium))
+                    .foregroundStyle(mode == .bypass ? Color.yellow : .primary)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(Color.secondary.opacity(0.10), in: Capsule())
+            .background(
+                mode == .bypass
+                    ? AnyShapeStyle(Color.yellow.opacity(0.15))
+                    : AnyShapeStyle(Color.secondary.opacity(0.10)),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        mode == .bypass ? Color.yellow.opacity(0.5) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
             .contentShape(Capsule())
         }
         .menuStyle(.borderlessButton)

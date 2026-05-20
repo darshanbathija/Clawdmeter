@@ -519,6 +519,10 @@ public final class SessionsModel: ObservableObject {
         model: String? = nil,
         effort: ReasoningEffort? = nil,
         acceptEdits: Bool = false,
+        // v0.7.15: empty-state composer can now pick Bypass and have it
+        // actually reach the spawned CLI. Caller is responsible for the
+        // trust-gate UX (AutopilotState.trustRepo) before passing true.
+        autopilot: Bool = false,
         pinnedJSONLURL: URL? = nil
     ) async throws -> AgentSession {
         // Fail fast on missing CLIs rather than spawning tmux + the
@@ -554,7 +558,7 @@ public final class SessionsModel: ObservableObject {
                 model: model,
                 planMode: planMode,
                 effort: effort,
-                autopilot: false,
+                autopilot: autopilot,
                 acceptEdits: acceptEdits,
                 resumeSessionId: resumeSessionId
             ) ?? []
@@ -563,7 +567,7 @@ public final class SessionsModel: ObservableObject {
                 model: model,
                 planMode: planMode,
                 effort: effort,
-                autopilot: false,
+                autopilot: autopilot,
                 acceptEdits: acceptEdits,
                 resumeSessionId: resumeSessionId
             ) ?? []

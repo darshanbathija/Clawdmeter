@@ -1639,6 +1639,27 @@ private struct ChatThreadScroll: View {
                                 .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         }
                     }
+                    // v0.7.16: thinking-indicator is now a footer row in
+                    // the List instead of a floating overlay. The old
+                    // overlay sat on top of the chat content at the
+                    // bottom-leading corner with `.allowsHitTesting(false)`
+                    // — when the user scrolled to the tail, the pill
+                    // covered the last 1-2 lines of the most recent
+                    // message. Inline-as-footer means the indicator
+                    // takes its own band below the last bubble and
+                    // scrolls with the content. The view self-hides
+                    // when `isActive` is false, so idle sessions get
+                    // zero vertical space.
+                    HStack {
+                        LiveSessionActivityIndicator(
+                            agent: session.agent,
+                            lastEventAt: store.snapshot.lastEventAt
+                        )
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     // Single-row pin sentinel — replaces the per-row
                     // .onAppear/.onDisappear pin tracking that fired on
                     // every chat-item row. One callback per scroll-edge
@@ -1689,23 +1710,8 @@ private struct ChatThreadScroll: View {
                     .padding(.bottom, 12)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
-                // v0.5.2 "session is still working" footer. Mirrors the
-                // iPhone indicator at bottom-leading of the chat thread.
-                // Pulses when store.snapshot.lastEventAt is within the
-                // 30s activity window.
-                VStack {
-                    Spacer()
-                    HStack {
-                        LiveSessionActivityIndicator(
-                            agent: session.agent,
-                            lastEventAt: store.snapshot.lastEventAt
-                        )
-                        .padding(.leading, 16)
-                        .padding(.bottom, 12)
-                        Spacer()
-                    }
-                }
-                .allowsHitTesting(false)
+                // v0.7.16: thinking-indicator overlay removed. It's now
+                // a footer row inside the List above (see comment there).
             }
             .animation(.easeOut(duration: 0.18), value: userPinnedToBottom)
         }

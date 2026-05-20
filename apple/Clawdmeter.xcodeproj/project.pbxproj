@@ -887,6 +887,7 @@
 			buildConfigurationList = 2D3E2AF62F9B6A0F3D439ED6 /* Build configuration list for PBXNativeTarget "ClawdmeterMac" */;
 			buildPhases = (
 				F4B99E1DB1C725C5440F6D21 /* Download bundled Node (if missing) */,
+				E10F266B179F33A036F17CA6 /* Download bundled uv (if missing) */,
 				2F4AE07AD7834EDEEC7B2479 /* Sources */,
 				690B143B6DBBCC6BB24A0180 /* Resources */,
 				349406630A509848EE27C4B5 /* Frameworks */,
@@ -1058,6 +1059,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		E10F266B179F33A036F17CA6 /* Download bundled uv (if missing) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Download bundled uv (if missing)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/ClawdmeterMac/Resources/Vendor/uv/uv",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CLAWDMETER_SKIP_BUNDLED_UV:-0}\" = \"1\" ]; then\n  echo \"Skipping bundled uv download (CLAWDMETER_SKIP_BUNDLED_UV=1)\"\n  exit 0\nfi\nREPO_ROOT=\"$(cd \"$SRCROOT/..\" && pwd)\"\nif [ ! -x \"$REPO_ROOT/apple/ClawdmeterMac/Resources/Vendor/uv/uv\" ]; then\n  \"$REPO_ROOT/tools/download-bundled-uv.sh\"\nfi\n";
+		};
 		F4B99E1DB1C725C5440F6D21 /* Download bundled Node (if missing) */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -1329,7 +1349,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 62;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1348,7 +1368,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.7.14;
+				MARKETING_VERSION = 0.7.16;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -1585,7 +1605,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 60;
+				CURRENT_PROJECT_VERSION = 62;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1598,7 +1618,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.7.14;
+				MARKETING_VERSION = 0.7.16;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -19,8 +19,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.7.14"
-    CURRENT_PROJECT_VERSION: "60"
+    MARKETING_VERSION: "0.7.16"
+    CURRENT_PROJECT_VERSION: "62"
 
 packages:
   ClawdmeterShared:
@@ -49,6 +49,9 @@ targets:
           # build phase below; exclude from default source scanning so
           # xcodegen doesn't try to compile it as a "source file".
           - "Resources/Vendor/node/**"
+          # v0.7.15: same exclusion for the bundled uv binary used by
+          # the Antigravity SDK toggle's Python venv provisioning.
+          - "Resources/Vendor/uv/**"
       # v0.7.1: bundled Node binary is treated as a "Copy Bundle
       # Resources" entry — Xcode copies the whole Vendor/node/ tree
       # into the .app's Contents/Resources/Vendor/node/. The folder
@@ -105,6 +108,24 @@ targets:
           fi
         outputFiles:
           - $(SRCROOT)/ClawdmeterMac/Resources/Vendor/node/bin/node
+      - name: Download bundled uv (if missing)
+        # v0.7.15: ensure the bundled uv binary exists before the
+        # resources phase runs. Same pattern as the Node script —
+        # idempotent + ~10ms warm path + ~25s cold. Skip via
+        # CLAWDMETER_SKIP_BUNDLED_UV=1 for dev iteration; falls back
+        # to the Disk-mode Antigravity SDK in that case (toggle just
+        # won't be able to provision).
+        script: |
+          if [ "${CLAWDMETER_SKIP_BUNDLED_UV:-0}" = "1" ]; then
+            echo "Skipping bundled uv download (CLAWDMETER_SKIP_BUNDLED_UV=1)"
+            exit 0
+          fi
+          REPO_ROOT="$(cd "$SRCROOT/.." && pwd)"
+          if [ ! -x "$REPO_ROOT/apple/ClawdmeterMac/Resources/Vendor/uv/uv" ]; then
+            "$REPO_ROOT/tools/download-bundled-uv.sh"
+          fi
+        outputFiles:
+          - $(SRCROOT)/ClawdmeterMac/Resources/Vendor/uv/uv
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.clawdmeter.mac

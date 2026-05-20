@@ -4,6 +4,96 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.16 build 62] - 2026-05-21
+
+### Fixed
+
+- **"Thinking…" indicator no longer overlaps the last message.** The
+  `<Ns> · thinking…` pill at the bottom-leading of the chat thread was
+  rendered as a floating overlay (`VStack { Spacer(); HStack {…} }` on
+  top of the ScrollView with `.allowsHitTesting(false)`). When the
+  user scrolled to the tail, the pill sat on top of the last 1-2 lines
+  of the most recent message bubble — visually unreadable, especially
+  with the asterisk spinner pulsing over the text. Indicator is now a
+  footer row inside the List itself, taking its own ~32pt band below
+  the last chat bubble. It still self-hides when the agent has been
+  idle ≥30s, so quiet sessions get zero vertical space.
+
+## [0.7.15 build 61] - 2026-05-21
+
+Real Antigravity SDK provisioning + composer Bypass mode that actually
+bypasses.
+
+### Added
+
+- **Bundled `uv` binary** (Astral's Python package manager, pinned to
+  0.5.11, ~28MB arm64 static Mach-O). Lives at
+  `Contents/Resources/Vendor/uv/uv` in the .app, downloaded by
+  `tools/download-bundled-uv.sh` (mirrors the Node script pattern).
+  Pre-build hook ensures it's present before the resources phase runs.
+- **Real `AntigravitySidecarManager.enableSDKMode()` implementation.**
+  Replaces the v0.7.14 skeleton. On first-enable:
+    1. Runs `uv venv --python 3.13 ~/Library/Application Support/Clawdmeter/python`
+       to create a sealed venv (~10s cold). Subsequent enables reuse it.
+    2. Runs `uv pip install --python <venv-python> google-antigravity~=0.0.3`
+       (~5s on warm pip cache). Captures stderr so install failures
+       surface the actual pip error in Settings → Antigravity, not a
+       generic "probe failed".
+    3. Probes the sidecar — spawns the venv's Python against
+       `clawdmeter-agents/main.py` which does `import google.antigravity`
+       inside its first JSON line. The Swift side reads
+       `sdk_import_ok: true|false` to confirm the import actually worked.
+  Progress is reported through `provisioningStep` so the Settings sheet
+  shows "Creating Python 3.13 venv (~10s)…" / "Installing
+  google-antigravity (~5s)…" / "Probing sidecar…" instead of a 15-second
+  blank spinner.
+- **Real `tools/clawdmeter-agents/main.py` + `observer.py`** — replaces
+  the v0.6.0 skeleton. `main.py` does the import-check + dispatches to
+  the observer agent; `observer.py` calls `Connection.local()` and polls
+  `total_usage` every 2s, emitting JSON-line `{"type":"usage", uuid,
+  totals:{input, output, cached, thoughts, total}}` deltas the daemon
+  side can map onto `AntigravityObservation.sdk`.
+- **Yellow accent on the Bypass mode chip** — the v0.7.13 uniform-grey
+  styling was wrong for a destructive mode where the agent has carte
+  blanche over the workspace. Bypass now renders as a yellow capsule
+  with a soft border + semibold label; Ask/Edits/Plan stay neutral.
+
+### Fixed
+
+- **Bypass mode picked in the empty-state composer now actually
+  bypasses.** `spawnSession` was hardcoding `autopilot: false` (lines
+  557 + 566 of `SessionsView.swift`), so picking "Bypass permissions"
+  from the chip before the first message silently downgraded the
+  spawned CLI argv back to `--permission-mode ask`. The fix:
+  - Adds `autopilot: Bool` parameter to `spawnSession()`. Threaded
+    through to `claudeArgv` / `codexArgv` / `geminiArgv` — Claude now
+    gets `--dangerously-skip-permissions`, Codex gets
+    `--dangerously-bypass-approvals-and-sandbox`, Gemini gets
+    `--approval-mode yolo`.
+  - `EmptyStateCenteredComposer.firstSend()` records per-repo trust via
+    `AutopilotState.shared.trustRepo(repoKey)` when bypass is picked, so
+    subsequent sessions in the same repo skip the confirmation sheet.
+    Seeds `PermissionModeStore.setBypass(true, sessionId:)` so the
+    bound chip + analytics row both reflect bypass mode immediately.
+  - Bound-session flips (the sheet flow already worked) are unchanged.
+- **The Antigravity SDK toggle now points at a venv-aware probe** —
+  previously the Swift probe used `/usr/bin/env python3` which would
+  pick up system Python (where `google-antigravity` is not installed)
+  even after uv had successfully populated the venv. Probe now uses
+  the venv's `bin/python` directly so the import check exercises the
+  package that was just installed.
+
+### Known limitation
+
+- `google-antigravity~=0.0.3` may not exist on PyPI yet (Google's
+  Antigravity 2.0.0 spec'd the SDK but hasn't published as of
+  2026-05-21). The provisioning surfaces uv's actual stderr in
+  Settings → Antigravity when the install fails, so users see the
+  real error ("No matching distribution found for google-antigravity"
+  or similar) and can wait for Google to publish. The toggle reverts
+  to OFF, Disk mode stays as the default — zero degradation for users
+  who don't care about SDK observation.
+
 ## [0.7.14 build 60] - 2026-05-21
 
 ### Fixed
