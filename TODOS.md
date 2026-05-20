@@ -21,6 +21,57 @@ follow-up that didn't make the v2.0 ship but is worth picking up.
 > ConversationFilter, and the cross-platform shared container all
 > deferred to v0.6 / v1.1 follow-ups below.
 
+## Audit-track follow-ups (bugfix/audit-fixes-v2, 2026-05-20)
+
+These are deferrals from the 40-commit audit-track campaign on
+`bugfix/audit-fixes-v2`. The campaign closed the high-severity findings
+(P0/P1/P2/codex-1..9). The items below are the lower-severity / refactor
+opportunities surfaced by `/review` after the campaign.
+
+### Stub-flag escape hatches
+- **What**: three env-flagged bypasses landed during the campaign without a
+  tracker:
+  - `CLAWDMETER_DAEMON_ALLOW_STUB` (`linux/Sources/ClawdmeterDaemon/main.swift`)
+    — defers Phase-3 transport wiring.
+  - `CLAWDMETER_PACKAGING_ALLOW_STUB` (`tools/build-linux-appimage.sh`,
+    `tools/build-linux-deb.sh`) — defers Phase-4 packaging completion.
+  - `CLAWDMETER_VISUAL_TEST_STRICT` (`linux/Tests/.../Visual/AssertImageEqual.swift`)
+    — skips visual-baseline tests when baselines aren't committed.
+- **Why**: each one is a known temporary backdoor. Without an entry here,
+  they survive every search-and-destroy pass after the campaign closes.
+- **Cleanup**: `grep -RE 'ALLOW_STUB|VISUAL_TEST_STRICT' linux/ tools/` at the
+  end of each phase. Delete the flag + the bypass it gates.
+
+### Missing regression tests (5 high-value gaps from `/review`)
+- `isValidJsonlPath` + `isValidRepoKey` symlink-resolve (AgentControlServer)
+- `TailscaleWhois.ipOnly` IPv6 round-trip (regression for the P2-Mac-4 rollback)
+- `TmuxControlClient` CR/LF / control-byte rejection (requires extracting
+  `validateArg` as static helper)
+- `TmuxControlClient.markExited` → `start()` re-spawn lifecycle
+- `PastedAnthropicTokenProvider.setToken("")` unconditional cache-clear (requires
+  Keychain-deleter override in test init)
+
+All five have ready-to-drop XCTest stubs in the `/review` artifact at
+`~/.gstack/projects/CCWatch/...test-outcome-*` from 2026-05-20.
+
+### Path-validator + fire-once duplication
+- **Three near-clone path validators** (`isValidRepoKey`, `isValidJsonlPath` in
+  AgentControlServer.swift; `isSafeArtifactPath` in iOSArtifactsPane.swift).
+  Pull a shared `PathValidator` helper into ClawdmeterShared with composable
+  predicates (rejectControlBytes, rejectTraversal, requireUnder(roots:)). Eliminates
+  the copy when the next validator is added.
+- **Two near-clone fire-once primitives** (`ResumeOnce` in ShellRunner.swift,
+  `BGTaskCompletionGuard` in ClawdmeteriOSApp.swift). Lift a single `FireOnce` helper
+  into ClawdmeterShared.
+
+### TOCTOU between artifact path-validate and read
+- `AgentControlServer.handleGetArtifact` resolves symlinks at validation time,
+  then re-opens the path via `Data(contentsOf:)`. An agent with worktree-write
+  can swap the file for a symlink between the check and the read. Practical
+  exploit value is limited (the agent already has shell access), but the fix
+  is small: open by fd with `O_NOFOLLOW` after the prefix check, or `fstat()`
+  the opened fd and re-verify device+inode against the pre-validate `lstat()`.
+
 ## v0.7 — Gemini provider follow-ups (2026-05-19)
 
 Triaged from /plan-ceo-review D13 + /plan-eng-review X3-C. The Mac UI for
