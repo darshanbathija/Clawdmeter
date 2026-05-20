@@ -161,6 +161,35 @@ public final class SessionChatStore: ObservableObject {
         Task { [staging] in await staging.setPlanText(text) }
     }
 
+    /// v0.7.3: append synthesized messages from the Codex SDK event
+    /// stream. Called by CodexSDKEventIngestor for each agent_message /
+    /// command_execution / reasoning event from the relay. The messages
+    /// flow through the same StagingParser → snapshot → chat-subscribe
+    /// pipeline as JSONL-sourced messages, so iOS clients receive them
+    /// over the existing chat-subscribe WS without needing a separate
+    /// channel.
+    public func appendSDKMessages(
+        _ messages: [ChatMessage],
+        at timestamp: Date = Date(),
+        deltaInputTokens: Int = 0,
+        deltaOutputTokens: Int = 0,
+        deltaCacheCreationTokens: Int = 0,
+        deltaCacheReadTokens: Int = 0,
+        model: String? = nil
+    ) {
+        guard !messages.isEmpty else { return }
+        let line = ParsedLine(
+            timestamp: timestamp,
+            messages: messages,
+            deltaInputTokens: deltaInputTokens,
+            deltaOutputTokens: deltaOutputTokens,
+            deltaCacheCreationTokens: deltaCacheCreationTokens,
+            deltaCacheReadTokens: deltaCacheReadTokens,
+            model: model
+        )
+        Task { [staging] in await staging.ingest(line) }
+    }
+
     public let sessionId: UUID
     private let sessionFileURL: URL
     private var tail: JSONLTail?
