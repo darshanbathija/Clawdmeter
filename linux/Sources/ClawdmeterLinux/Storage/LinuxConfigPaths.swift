@@ -47,17 +47,25 @@ public enum LinuxConfigPaths {
     /// directory at the requested path.
     public enum LinuxConfigPathError: Error {
         case unsafeOwnership(path: String)
+        case statFailed(path: String, errno: Int32)
     }
 
     /// Ensures a directory exists with mode 0700 owned by the current uid.
-    /// Throws on I/O failure or if the existing entry is a symlink / owned
-    /// by another uid (potential symlink attack on `/tmp` fallback paths).
+    /// Throws on I/O failure or if the existing entry is a symlink, owned
+    /// by another uid, OR has group/world write bits set (potential
+    /// symlink attack on `/tmp` fallback paths).
     ///
     /// P1-Linux-5: when XDG_RUNTIME_DIR isn't set, runtimeDir falls back
     /// to `/tmp/clawdmeter-<uid>/`. `/tmp` is world-writable, so a local
     /// attacker can pre-create that path as a symlink to redirect daemon
-    /// writes. Validate ownership + mode + non-symlink before trusting the
-    /// directory; refuse to use it otherwise.
+    /// writes, or as a real directory with permissive bits. Validate
+    /// ownership + mode + non-symlink before trusting the directory;
+    /// refuse to use it otherwise.
+    ///
+    /// Codex follow-up: the earlier patch returned success silently on
+    /// `lstat()` failure and never checked the actual mode bits. Both
+    /// gaps are closed here: lstat errors now throw, and the post-create
+    /// check rejects anything with group/world write bits set.
     @discardableResult
     public static func ensureDirectory(_ url: URL) throws -> URL {
         let fm = FileManager.default
@@ -69,10 +77,16 @@ public enum LinuxConfigPaths {
         // Post-conditions: not a symlink, owned by us, mode tight enough.
         // lstat(2) reports the link itself; stat(2) follows.
         var st = stat()
-        guard lstat(path, &st) == 0 else { return url }
+        if lstat(path, &st) != 0 {
+            throw LinuxConfigPathError.statFailed(path: path, errno: errno)
+        }
         let isSymlink = (st.st_mode & S_IFMT) == S_IFLNK
         let ownedByUs = st.st_uid == getuid()
-        if isSymlink || !ownedByUs {
+        // Permission bits in the low 9 bits. Refuse anything with group
+        // or world write set (0o022) — even an attacker-readable dir is
+        // a leak vector for runtime files (live tokens, sockets, IPC).
+        let groupOrWorldWrite = (mode_t(st.st_mode) & 0o022) != 0
+        if isSymlink || !ownedByUs || groupOrWorldWrite {
             throw LinuxConfigPathError.unsafeOwnership(path: path)
         }
         return url

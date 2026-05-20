@@ -56,5 +56,19 @@ struct ClawdmeterDaemon {
             FileHandle.standardError.write(Data("clawdmeterd: transport start failed: \(error)\n".utf8))
             exit(1)
         }
+        // Codex follow-up to P1-Linux-4: HummingbirdTransport.start() is
+        // still a Phase 3 stub that returns immediately on Linux (its
+        // body is a `TODO(Phase 3)` block — no actual server). Falling
+        // through to a clean exit puts the systemd service back into
+        // "active (exited)" state with no listener.
+        //
+        // Until the real implementation lands, fail loud so systemd's
+        // `Restart=on-failure` actually restarts and the operator sees
+        // the dependency gap. Set CLAWDMETER_DAEMON_ALLOW_STUB=1 to
+        // keep the legacy exit-0 behaviour during local development.
+        if ProcessInfo.processInfo.environment["CLAWDMETER_DAEMON_ALLOW_STUB"] != "1" {
+            FileHandle.standardError.write(Data("clawdmeterd: HummingbirdTransport.start() returned without serving. Phase 3 transport implementation is not wired. Exiting non-zero so systemd restarts.\n".utf8))
+            exit(2)
+        }
     }
 }
