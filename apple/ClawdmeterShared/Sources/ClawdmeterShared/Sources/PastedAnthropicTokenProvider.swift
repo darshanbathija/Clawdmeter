@@ -91,12 +91,27 @@ public final class PastedAnthropicTokenProvider: TokenProvider, @unchecked Senda
 
     /// Persist the token and update the in-memory cache. Pass an empty string
     /// to clear ("Sign out").
+    ///
+    /// Codex follow-up to P1-Shared-2: clear `cached` UNCONDITIONALLY
+    /// on the empty-token path. Before this change, deleteFromKeychain()
+    /// only nilled `cached` when the Keychain call returned
+    /// errSecSuccess or errSecItemNotFound — any other status (e.g.,
+    /// Keychain locked, item present but undeletable) left the cached
+    /// token in memory. With the new singleton, every caller shared
+    /// that stale token, so "Sign out" could appear successful while
+    /// the daemon kept using the old token until process restart.
     @discardableResult
     public func setToken(_ token: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return deleteFromKeychain()
+            let deleted = deleteFromKeychain()
+            // Even if Keychain refused the delete, drop the in-memory
+            // copy. The persistent store may still hold the token
+            // (caller can retry), but the singleton must not keep
+            // serving it.
+            cached = nil
+            return deleted
         }
         let ok = writeToKeychain(value: trimmed)
         if ok { cached = trimmed }
