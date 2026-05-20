@@ -150,7 +150,11 @@ public final class GeminiQuotaLiveActivityCoordinator: ObservableObject {
     private func postPushTokenJSON(
         host: String, port: Int, bearer: String, method: String, body: [String: String]
     ) async {
-        guard let url = URL(string: "http://\(host):\(port)/live-activities/push-token") else { return }
+        // P1-Mac-19: bracket raw IPv6 literals (Tailscale pairing hands us
+        // unbracketed addresses), otherwise URL(string:) returns nil and
+        // we silently skip push-token registration.
+        let safeHost = AgentControlClient.urlHostLiteral(host)
+        guard let url = URL(string: "http://\(safeHost):\(port)/live-activities/push-token") else { return }
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else { return }
         var req = URLRequest(url: url)
         req.httpMethod = method
