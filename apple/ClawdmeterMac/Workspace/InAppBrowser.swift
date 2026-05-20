@@ -207,6 +207,12 @@ private struct WebView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // P1-Mac-13: remove the script message handler and clear delegates
+        // before detaching, otherwise WKUserContentController retains the
+        // coordinator and leaks a WKWebView on every tab change.
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "clawdmeterComment")
+        nsView.navigationDelegate = nil
+        nsView.uiDelegate = nil
         WebViewBus.shared.detach(nsView)
     }
 
