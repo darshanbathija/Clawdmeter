@@ -134,6 +134,7 @@
 		DBEF8189EAE4708372F1009E /* iOSComposerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 258860E4C81547276D4E7F3C /* iOSComposerBar.swift */; };
 		DCA8543E3CD0D2378D6C6BC3 /* PseudoTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 985A7892D8BD9DC9E3227E5F /* PseudoTerminal.swift */; };
 		E12B14B2458C468678246859 /* ClawdmeterShared in Frameworks */ = {isa = PBXBuildFile; productRef = E5841B9F5A902887629FD6BF /* ClawdmeterShared */; };
+		E4639C4A18DB98EEEA3FE15D /* CodexSDKSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7522B33A2BBD974C63BEDC00 /* CodexSDKSettingsView.swift */; };
 		E4CD6841EFEBD563297221FF /* SourcesPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C446A0B7936EDEA144F30E /* SourcesPane.swift */; };
 		E550450049825A95D9DB7D0E /* SessionScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D321C61E9596892F1EB13C97 /* SessionScheduler.swift */; };
 		E5B02D23A455732FCE0D57E1 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2672EC5D93791232630202C /* AttachmentStaging.swift */; };
@@ -283,6 +284,7 @@
 		6FF9E7F2868CDF9804D82F59 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		717807F26A96613EF8C57F1C /* iOSModelEffortPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSModelEffortPill.swift; sourceTree = "<group>"; };
 		748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdmeterMacWidgets.swift; sourceTree = "<group>"; };
+		7522B33A2BBD974C63BEDC00 /* CodexSDKSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSDKSettingsView.swift; sourceTree = "<group>"; };
 		771A489D405A0930831693F7 /* PermissionModeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModeStore.swift; sourceTree = "<group>"; };
 		77FDB4429B0506B4FCAED27D /* PlanApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanApprovalView.swift; sourceTree = "<group>"; };
 		797168CA4C5227800441FD18 /* MentionPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionPicker.swift; sourceTree = "<group>"; };
@@ -516,6 +518,7 @@
 				8E414059E5EEBAE58913412B /* AppTheme.swift */,
 				052C6AEF07A486E8A35669C5 /* Assets.xcassets */,
 				44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */,
+				7522B33A2BBD974C63BEDC00 /* CodexSDKSettingsView.swift */,
 				0273529FD22962799981CE40 /* DashboardView.swift */,
 				104A8D8EF2D307E5484E7AAA /* DiagnosticsSettingsView.swift */,
 				57628CCF5D9B28CF5F0F0F3B /* LiveActivitySetupView.swift */,
@@ -1011,6 +1014,7 @@
 				EDF8A47DEA8AA968DC543046 /* ChatStreamWebSocketChannel.swift in Sources */,
 				1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */,
 				584179F5CEEFB2FF845669B7 /* CodexSDKManager.swift in Sources */,
+				E4639C4A18DB98EEEA3FE15D /* CodexSDKSettingsView.swift in Sources */,
 				536D0374AE837765530A760E /* CommandPalette.swift in Sources */,
 				3E4ECC9D7E017C2E27E605F5 /* ComposerInputCore.swift in Sources */,
 				8ABD7420F16C440E13AA36DF /* ControlModeFrame.swift in Sources */,
