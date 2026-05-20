@@ -43,6 +43,7 @@
 		358CD1C23BCFA5602E805A41 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E414059E5EEBAE58913412B /* AppTheme.swift */; };
 		35FF2B2D02857186CD94E7E1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6576347309635291F6B4C01B /* Assets.xcassets */; };
 		370187D5FB528DC613BE368B /* SessionConfigChanger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCD917577DAE8F4BE5BCA99 /* SessionConfigChanger.swift */; };
+		37E0278B4547981DAF8C596E /* ChatCwdManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A81E6EE66C111C5A4B527B7F /* ChatCwdManager.swift */; };
 		389C34543E4E3E857E98DC40 /* GeminiLogo.svg in Resources */ = {isa = PBXBuildFile; fileRef = 61DCEB1020CBB0E324C60959 /* GeminiLogo.svg */; };
 		3C1B58E34AA8D8FC4831DBAF /* ClawdmeterMacWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */; };
 		3D153FBD1EF5FB96D68B6AA4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1C3B5FDF4AB46F3A7B4FC6 /* SettingsView.swift */; };
@@ -121,6 +122,7 @@
 		B081F058485D14758B82D037 /* DaemonChatStoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C2DF0BC33E8B4A3197CFDD /* DaemonChatStoreRegistry.swift */; };
 		B159F7CDA71BDFF3AB7E7375 /* iOSTerminalTabsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC90C2ABAFB600289ACFF55D /* iOSTerminalTabsView.swift */; };
 		B49079C1A819C08F8AD06F3B /* TailscaleWhois.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C46A8561985C07E6E31A13 /* TailscaleWhois.swift */; };
+		B6476D12C0F54133B30C941B /* AgentSpawnerChatArgvTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1F1B18737CE3024BDD5620 /* AgentSpawnerChatArgvTests.swift */; };
 		B7F6A1B2546014D520DE724C /* iOSSessionActivityStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8EC55494D4D0B26A8B3C366 /* iOSSessionActivityStrip.swift */; };
 		B91953253B345054E392D6FC /* CodexLogo.png in Resources */ = {isa = PBXBuildFile; fileRef = 6C40566A9CD019426F02502C /* CodexLogo.png */; };
 		C0B6077013D39D05387FD7E4 /* iOSPlanTrackerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08ACE23C4B4D169F54F10A1 /* iOSPlanTrackerView.swift */; };
@@ -349,6 +351,7 @@
 		A5239318D643E1B51443A7C3 /* AutopilotState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotState.swift; sourceTree = "<group>"; };
 		A6490142FD2D271DE257FD38 /* CodexStreamWebSocketChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexStreamWebSocketChannel.swift; sourceTree = "<group>"; };
 		A7EDE305AE4E9350183F0920 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		A81E6EE66C111C5A4B527B7F /* ChatCwdManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatCwdManager.swift; sourceTree = "<group>"; };
 		A8EC55494D4D0B26A8B3C366 /* iOSSessionActivityStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSSessionActivityStrip.swift; sourceTree = "<group>"; };
 		A965446683135119981D9C40 /* ControlModeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlModeParser.swift; sourceTree = "<group>"; };
 		A99393EFDDEECF67D62E5E4C /* CodexSDKManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSDKManager.swift; sourceTree = "<group>"; };
@@ -379,6 +382,7 @@
 		DC56D7440BE0E567075D87F5 /* ChatStreamWebSocketChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStreamWebSocketChannel.swift; sourceTree = "<group>"; };
 		DDE036C3B197F45A234547AD /* MarkdownRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRenderer.swift; sourceTree = "<group>"; };
 		DE0C409B82A2CE3CC4741248 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		DE1F1B18737CE3024BDD5620 /* AgentSpawnerChatArgvTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSpawnerChatArgvTests.swift; sourceTree = "<group>"; };
 		E0013A446A095792287595D9 /* CodexSubscriptionRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSubscriptionRelay.swift; sourceTree = "<group>"; };
 		E2672EC5D93791232630202C /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
 		E37960317F2D69E2E52475CD /* WatchPlanBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchPlanBridge.swift; sourceTree = "<group>"; };
@@ -476,6 +480,7 @@
 				21239F87404DC4B4E7F21AB7 /* APNSCredentialStore.swift */,
 				FB8D04D48E1D2426976FC898 /* AuditLog.swift */,
 				A5239318D643E1B51443A7C3 /* AutopilotState.swift */,
+				A81E6EE66C111C5A4B527B7F /* ChatCwdManager.swift */,
 				DC56D7440BE0E567075D87F5 /* ChatStreamWebSocketChannel.swift */,
 				5497BA15075A9EDF75AB2A3B /* CodexSDKEventIngestor.swift */,
 				A99393EFDDEECF67D62E5E4C /* CodexSDKManager.swift */,
@@ -656,6 +661,7 @@
 		6E4F3C864DD3FBCB30E9CE74 /* ClawdmeterMacTests */ = {
 			isa = PBXGroup;
 			children = (
+				DE1F1B18737CE3024BDD5620 /* AgentSpawnerChatArgvTests.swift */,
 				98E6E75C4550204AE0288EB6 /* PathValidatorMacTests.swift */,
 				96A2F50347CBD669083BB20A /* SidecarAskCoordinatorTests.swift */,
 				4D2A6ACB7ED52F90032E358F /* TailscaleWhoisIpOnlyTests.swift */,
@@ -1107,6 +1113,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B6476D12C0F54133B30C941B /* AgentSpawnerChatArgvTests.swift in Sources */,
 				453B70AABD9A8921BA9706FB /* PathValidatorMacTests.swift in Sources */,
 				030F8C597B7C15295B250217 /* SidecarAskCoordinatorTests.swift in Sources */,
 				3FA93795C2490B0FF32C0353 /* TailscaleWhoisIpOnlyTests.swift in Sources */,
@@ -1137,6 +1144,7 @@
 				81F407333048D725DF4BB5EB /* AuditLog.swift in Sources */,
 				4F73308F1D381B3179C1BE3F /* AutopilotChip.swift in Sources */,
 				D609B22B0D306509093B09D2 /* AutopilotState.swift in Sources */,
+				37E0278B4547981DAF8C596E /* ChatCwdManager.swift in Sources */,
 				EDF8A47DEA8AA968DC543046 /* ChatStreamWebSocketChannel.swift in Sources */,
 				1A33BCE35CFE5B8AFC5BD284 /* ClawdmeterMacApp.swift in Sources */,
 				0190050C63A0552D50548BA8 /* CodexPlanPane.swift in Sources */,
