@@ -254,14 +254,50 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
 
+  # ───────────────────────────────────────────────────────────────
+  # Mac XCTest target — v0.7.7. Exercises the Mac-only helpers that
+  # can't be reached from ClawdmeterShared's SwiftPM test target:
+  # PathValidator delegation, TailscaleWhois.ipOnly, TmuxControlClient
+  # argv validation, SidecarAskCoordinator first-wins semantics.
+  #
+  # Hosted by the ClawdmeterMac application target; `@testable import
+  # ClawdmeterMac` works because xcodegen emits the test-host
+  # configuration automatically when `testTargets:` references the app
+  # target in the scheme below.
+  # ───────────────────────────────────────────────────────────────
+  ClawdmeterMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: ClawdmeterMacTests
+    dependencies:
+      - target: ClawdmeterMac
+      - package: ClawdmeterShared
+        product: ClawdmeterShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.clawdmeter.mac.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "76S62SDSD3"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Clawdmeter.app/Contents/MacOS/Clawdmeter"
+
 schemes:
   Clawdmeter (Mac):
     build:
       targets:
         ClawdmeterMac: all
         ClawdmeterMacWidgets: all
+        ClawdmeterMacTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - ClawdmeterMacTests
     archive:
       config: Release
     profile:

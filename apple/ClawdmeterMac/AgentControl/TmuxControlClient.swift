@@ -218,19 +218,14 @@ public actor TmuxControlClient {
     @discardableResult
     public func command(_ args: [String]) async throws -> CommandResult {
         guard pty != nil else { throw TmuxError.notStarted }
-        // P1-Mac-6: reject CR/LF and ASCII control bytes in every arg. The
-        // wire format here is plaintext joined with spaces and terminated by
-        // `\n`, so any control byte in an arg can split the line and inject
-        // an unrelated tmux command (or worse, paste into a child pane).
-        // `tmuxQuote` below only escapes single quotes; it cannot prevent
-        // this class of injection.
-        for arg in args {
-            for scalar in arg.unicodeScalars {
-                if scalar.value < 0x20 || scalar.value == 0x7F {
-                    throw TmuxError.invalidArgument(arg)
-                }
-            }
-        }
+        // P1-Mac-6: reject CR/LF and ASCII control bytes via the static
+        // helper so the regression test can exercise the same code path
+        // without a live PTY. The wire format here is plaintext joined
+        // with spaces and terminated by `\n`, so any control byte in an
+        // arg can split the line and inject an unrelated tmux command
+        // (or worse, paste into a child pane). `tmuxQuote` below only
+        // escapes single quotes; it cannot prevent this class of injection.
+        try Self.validateArgs(args)
         let cmd = args.joined(separator: " ") + "\n"
         return try await withCheckedThrowingContinuation { continuation in
             // We don't know the command number until tmux echoes back
@@ -480,5 +475,19 @@ public actor TmuxControlClient {
         case serverExited
         case ptyClosed
         case invalidArgument(String)
+    }
+
+    /// v0.7.7: extracted from `command(_:)` so the regression test for
+    /// CR/LF / control-byte rejection can exercise the same code path
+    /// without a live PTY. Throws `.invalidArgument(arg)` on the first
+    /// arg that contains any C0 (< 0x20) or DEL (0x7F) byte.
+    public static func validateArgs(_ args: [String]) throws {
+        for arg in args {
+            for scalar in arg.unicodeScalars {
+                if scalar.value < 0x20 || scalar.value == 0x7F {
+                    throw TmuxError.invalidArgument(arg)
+                }
+            }
+        }
     }
 }
