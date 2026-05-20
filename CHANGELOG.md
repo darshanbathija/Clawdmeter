@@ -4,6 +4,122 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.0 build 46] - 2026-05-20
+
+Codex SDK observation mode. v0.6.0 shipped the Antigravity SDK
+toggle pattern + v2-native Plan surfaces; v0.7.0 extends the same
+opt-in toggle architecture to OpenAI's Codex SDK. **Same auth story:
+piggybacks on the user's existing `codex login` ChatGPT OAuth — no
+per-token API billing.** Verified against `~/.codex/auth.json` on
+the dev machine before designing: `"auth_mode": "chatgpt"` with
+OAuth tokens from an active ChatGPT subscription and
+`"OPENAI_API_KEY": null`. SDK inherits this on startup.
+
+Shipped as 5 commits on `feat/codex-sdk`, fast-forward merged to
+`main`. Suite 438 → 457 Swift + 4 new Node `node --test`. Mac / iOS /
+Watch all `BUILD SUCCEEDED`. No breaking changes — wire v8 is
+purely additive (single optional UsageData field).
+
+### Why Codex SDK but not Claude Agent SDK
+
+Same evaluation, opposite conclusion. The Codex SDK piggybacks on the
+local Codex CLI's `auth_mode: "chatgpt"` OAuth — usage draws against
+ChatGPT subscription quota, no extra API billing. The Claude Agent
+SDK's own docs explicitly disallow `claude.ai` login in third-party
+SDK products and require `ANTHROPIC_API_KEY` (per-token billing) —
+Max subscribers would pay twice. v0.7.0 ships the Codex side; the
+Claude Agent SDK remains deferred until/unless that policy changes.
+
+### Architecture
+
+Mirrors the v0.6.0 `AntigravityObservation` pattern. Two operating
+modes per provider — Disk (default, no extra runtime) + SDK (opt-in
+toggle, recommended for paid users). Implementation-agnostic via the
+`CodexObservation` protocol so the toggle is a hot swap from Settings.
+
+### Shared package
+
+- **`CodexObservation` protocol** — `isAvailable()`, `latestUsage()`,
+  `modeLabel`. Async because SDK mode runs over IPC; Disk mode
+  resolves immediately.
+- **`DiskCodexObservationProvider`** (Mac actor) wraps the existing
+  `~/.codex/sessions/*.jsonl` parsing path. Reads at most 64KB of
+  the newest rollout to find the `session_meta` line — bounded so
+  long rollouts don't pull multi-MB to extract rate-limit state.
+  modeLabel = "disk mode". **No behavior change vs v0.6.0** — this
+  is a refactor that puts the existing parser behind the protocol.
+- **`SDKCodexObservationProviderStub`** — placeholder until full IPC
+  wiring lands in v0.7.1. modeLabel = "SDK mode (provisioning)".
+- **`CodexUsageSnapshot`** — coarse DTO decoupled from `UsageData`.
+  Disk impl populates from `session_meta` JSONL line; SDK impl
+  (v0.7.1) will populate from `turn.completed.usage` event stream.
+- **Wire v7→v8**. `AgentControlWireVersion.current = 8`,
+  `codexSDKMinimum = 8`, `supportsCodexSDK(serverWireVersion:)`.
+  `UsageData` gains optional `codexSDKModeActive: Bool?` field
+  (decodeIfPresent — back-compat preserved). v8 is purely additive:
+  no new endpoints, no new WS ops. The field rides on the existing
+  `/usage` envelope.
+
+### Node sidecar (skeleton)
+
+- `tools/clawdmeter-codex-sdk/main.mjs` — JSON-lines dispatcher.
+  Reads `agent` from first stdin line, forwards subsequent ops to
+  the chosen subcommand. v0.7.0 skeleton emits
+  `{"type":"ready","version":"0.7.0-skeleton"}` then
+  `{"type":"error","code":"sdk_not_provisioned"}` so the
+  CodexSDKManager fail-soft path exercises end-to-end.
+- `tools/clawdmeter-codex-sdk/package.json` — Node 18+ ESM module.
+  `@openai/codex-sdk` dep commented out; v0.7.1 will uncomment +
+  run `npm install` from CodexSDKManager.
+- `tools/clawdmeter-codex-sdk/tests/main.test.mjs` — 4 Node native
+  test runner tests: happy-path ready+error, EOF graceful no-op,
+  garbage-JSON header errors with code 1, second-op-line dispatched
+  cleanly without crash.
+
+**Why Node not Python?** Codex itself ships as `npm install -g
+@openai/codex` — Node is on PATH wherever `codex` runs. SDK is
+TypeScript-stable / Python-experimental; pick the stable surface.
+The Antigravity sidecar stays Python because the Antigravity SDK
+is the inverse: Python-stable / TypeScript-not-shipped.
+
+### Mac
+
+- **`CodexSDKManager`** (`@MainActor` singleton). Same toggle-revert-
+  on-skeleton-detected flow as `AntigravitySidecarManager`. Reads
+  `clawdmeter.codex.sdkMode` UserDefaults. On `enableSDKMode()`:
+  locates the sidecar entry point relative to cwd; locates the
+  `node` binary across Homebrew + system paths + `which` fallback;
+  spawns with a probe header; parses the skeleton response within
+  5s; reverts the toggle + stores the error message in
+  `lastProvisioningError` for Settings → Diagnostics.
+
+### Deferred to v0.7.1
+
+- Real `npm install @openai/codex-sdk` provisioning into
+  `~/Library/Application Support/Clawdmeter/codex-sdk/` from
+  CodexSDKManager
+- `observer` subcommand: long-running stdio bridge over
+  `thread.runStreamed()` emitting `item.completed` + `turn.completed`
+  events with token usage
+- `resume` subcommand: `codex.resumeThread(threadId).run(prompt)` for
+  iOS→Mac spawn handoff via the X1 compose-draft WS op
+- iOS subtitle wiring (`"· SDK mode"` on Codex column when
+  `codexSDKModeActive == true`)
+- Bundled Node binary in Resources (currently relies on system Node)
+
+### Tests
+
+- Swift suite: 438 → 457 (+19 net). CodexObservation × 9 + WireV8 × 10.
+- Node suite: 0 → 4 (`node --test`).
+- Mac / iOS / Watch xcodebuild: clean across every commit.
+
+### Worktree parallelization
+
+Single lane this time — Codex SDK integration is contained
+(no iOS/Watch surface changes in v0.7.0, only Mac + shared).
+v0.7.1 will fan out to iOS subtitle work + bundled Node binary
+work in parallel.
+
 ## [0.6.0 build 45] - 2026-05-20
 
 Antigravity 2 native. v0.5.11 broke silently for users on Google's
