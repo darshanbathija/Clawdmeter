@@ -116,14 +116,6 @@ struct iOSArtifactsPane: View {
 
     private func open(_ entry: ArtifactEntry) async {
         guard downloading == nil else { return }
-        // P2-iOS-7: reject any path that contains a `..` traversal segment
-        // or starts with `/` — the daemon should also enforce this, but
-        // keeping the client honest blocks the obvious attack from a
-        // compromised artifact list before it leaves the device.
-        guard Self.isSafeArtifactPath(entry.path) else {
-            self.error = "Refusing to fetch unsafe artifact path: \(entry.path)"
-            return
-        }
         downloading = entry.path
         defer { downloading = nil }
         do {
@@ -134,18 +126,6 @@ struct iOSArtifactsPane: View {
         } catch {
             self.error = error.localizedDescription
         }
-    }
-
-    /// Reject paths that try to escape the session's artifact root.
-    /// Absolute paths (`/etc/passwd`) and any segment equal to `..` or
-    /// `.` are refused. Empty paths are also refused.
-    static func isSafeArtifactPath(_ path: String) -> Bool {
-        guard !path.isEmpty else { return false }
-        if path.hasPrefix("/") { return false }
-        for segment in path.split(separator: "/") {
-            if segment == ".." || segment == "." { return false }
-        }
-        return true
     }
 }
 

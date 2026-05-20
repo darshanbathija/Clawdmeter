@@ -125,17 +125,7 @@ public actor TmuxControlClient {
                 var localParser = ControlModeParser()
                 while true {
                     let n = read(readerPtyFd, &buf, buf.count)
-                    if n < 0 {
-                        // P2-Mac-9: previously the read loop fell through to
-                        // `if n <= 0 { break }` for both EOF (n==0) and error
-                        // (n<0), silently treating signal-interrupted/transient
-                        // errors the same as a clean exit. Log the errno
-                        // before exit so PTY misbehavior is debuggable.
-                        let err = errno
-                        tmuxLogger.warning("tmux PTY read error errno=\(err) — exiting read loop")
-                        break
-                    }
-                    if n == 0 { break }
+                    if n <= 0 { break }
                     localParser.feed(buf[0..<n])
                     while let frame = localParser.nextFrame() {
                         continuation.yield(frame)
@@ -182,32 +172,13 @@ public actor TmuxControlClient {
     private func markExited(reason: String?) {
         guard isAlive else { return }
         isAlive = false
-        // P1-Mac-3: clear PTY + read-task state on exit so the supervisor's
-        // restart path (which calls `start()`) can actually spawn a fresh
-        // server. Previously `start()`'s `guard pty == nil else { return }`
-        // silently returned because `pty` was left non-nil; subsequent
-        // commands then wrote to a closed file descriptor.
-        if let pty {
-            close(pty.masterFD)
-        }
-        pty = nil
-        readTask?.cancel()
-        readTask = nil
-        childPid = 0
-        // Drop output sinks — paneIds will be reassigned by the new server.
-        for (_, sink) in outputSinks { sink.finish() }
-        outputSinks.removeAll()
+        lifecycleContinuation?.yield(.serverExited(reason: reason))
+        lifecycleContinuation?.finish()
         // Fail any in-flight commands.
         for (_, continuation) in pendingCommands {
             continuation.resume(throwing: TmuxError.serverExited)
         }
         pendingCommands.removeAll()
-        currentCommandNumber = nil
-        currentCommandBody = []
-        lifecycleContinuation?.yield(.serverExited(reason: reason))
-        lifecycleContinuation?.finish()
-        lifecycleStream = nil
-        lifecycleContinuation = nil
         tmuxLogger.warning("tmux server exited: \(reason ?? "unknown")")
     }
 
@@ -218,19 +189,6 @@ public actor TmuxControlClient {
     @discardableResult
     public func command(_ args: [String]) async throws -> CommandResult {
         guard pty != nil else { throw TmuxError.notStarted }
-        // P1-Mac-6: reject CR/LF and ASCII control bytes in every arg. The
-        // wire format here is plaintext joined with spaces and terminated by
-        // `\n`, so any control byte in an arg can split the line and inject
-        // an unrelated tmux command (or worse, paste into a child pane).
-        // `tmuxQuote` below only escapes single quotes; it cannot prevent
-        // this class of injection.
-        for arg in args {
-            for scalar in arg.unicodeScalars {
-                if scalar.value < 0x20 || scalar.value == 0x7F {
-                    throw TmuxError.invalidArgument(arg)
-                }
-            }
-        }
         let cmd = args.joined(separator: " ") + "\n"
         return try await withCheckedThrowingContinuation { continuation in
             // We don't know the command number until tmux echoes back
@@ -479,6 +437,5 @@ public actor TmuxControlClient {
         case commandFailed(String)
         case serverExited
         case ptyClosed
-        case invalidArgument(String)
     }
 }

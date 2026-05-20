@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import SwiftUI
 
 /// v0.5.6 interactive answer tray for `AskUserQuestion` tool_use calls.
@@ -177,4 +176,3 @@ public struct AskUserQuestionTray: View {
         Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0)
     }
 }
-#endif

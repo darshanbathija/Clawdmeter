@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import SwiftUI
 
 /// "Session is still working" footer for the live chat list. Shows when
@@ -192,4 +191,3 @@ private struct CodexPulseSpinner: View {
         return 0.3 + 0.7 * (1 - positive)
     }
 }
-#endif

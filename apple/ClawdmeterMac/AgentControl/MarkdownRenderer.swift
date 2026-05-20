@@ -24,39 +24,22 @@ struct MarkdownRenderer: View {
     /// at a time so this naturally bounds cache size to the visible
     /// window. Off-screen messages evict with the view; scrolling back
     /// re-parses (sub-millisecond per message).
-    ///
-    /// P1-Mac-12: pair the cached chunks with the source they were parsed
-    /// from. The previous form had a `if source == src` guard inside the
-    /// detached Task closure, but `source` was captured by value at
-    /// closure creation — so the comparison was always `src == src` and
-    /// older slow parses could clobber fresh chunks during LazyVStack
-    /// recycling. We now compare the parsed source against the View's
-    /// current `source` on every render and on assignment.
-    @State private var cache: CacheEntry?
-
-    private struct CacheEntry: Equatable {
-        let source: String
-        let chunks: [PreparedChunk]
-    }
+    @State private var cachedChunks: [PreparedChunk]?
 
     /// A chunk with its AttributedString pre-parsed (for prose) so the
     /// view body doesn't call `AttributedString(markdown:)` on every render.
-    private struct PreparedChunk: Identifiable, Equatable {
+    private struct PreparedChunk: Identifiable {
         let id: Int
         let kind: Kind
-        enum Kind: Equatable {
+        enum Kind {
             case prose(AttributedString, fallback: String)
             case code(language: String?, body: String)
         }
     }
 
     var body: some View {
-        // Only render chunks whose parse source matches the current view
-        // source — protects against stale slow parses clobbering fresh
-        // ones when LazyVStack recycles a row to a different message.
-        let liveChunks: [PreparedChunk] = (cache?.source == source) ? (cache?.chunks ?? []) : []
-        return VStack(alignment: .leading, spacing: 8) {
-            ForEach(liveChunks) { chunk in
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(cachedChunks ?? []) { chunk in
                 switch chunk.kind {
                 case .prose(let attr, _):
                     Text(attr)
@@ -75,28 +58,39 @@ struct MarkdownRenderer: View {
             // inside `.onAppear` on the main thread caused faulted-in
             // scroll hitches the perf overhaul was meant to eliminate.
             // We render the row immediately (chunks=nil → empty body)
-            // and assign the parsed chunks back when ready.
-            kickParseIfNeeded(for: source)
+            // and assign the parsed chunks back when ready. The visual
+            // effect is "row appears, text fills in within ~1 frame".
+            if cachedChunks == nil {
+                let src = source
+                Task.detached(priority: .userInitiated) {
+                    let prepared = Self.prepare(source: src)
+                    await MainActor.run {
+                        // Only assign if the source the view holds is
+                        // still the one we parsed — protects against
+                        // LazyVStack rebinding during the parse.
+                        if source == src {
+                            cachedChunks = prepared
+                        }
+                    }
+                }
+            }
         }
         // SwiftUI's LazyVStack recycling means a row's @State can outlive
         // the original `source` (e.g., when the underlying message id
         // changes via diffing). Re-parse on source change so we don't
         // render stale markdown chunks for a different message body.
         .onChange(of: source) { _, newValue in
-            kickParseIfNeeded(for: newValue)
-        }
-    }
-
-    private func kickParseIfNeeded(for src: String) {
-        // Skip if we already have chunks for this exact source.
-        if cache?.source == src { return }
-        Task.detached(priority: .userInitiated) {
-            let prepared = Self.prepare(source: src)
-            await MainActor.run {
-                // Persist `(src, prepared)` together so the body's
-                // `cache.source == source` guard discards results from
-                // older parses if a newer source arrived first.
-                cache = CacheEntry(source: src, chunks: prepared)
+            let src = newValue
+            // Clear the stale cache so the view doesn't render the
+            // previous source's markdown for one frame.
+            cachedChunks = nil
+            Task.detached(priority: .userInitiated) {
+                let prepared = Self.prepare(source: src)
+                await MainActor.run {
+                    if source == src {
+                        cachedChunks = prepared
+                    }
+                }
             }
         }
     }

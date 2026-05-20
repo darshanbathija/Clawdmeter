@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import SwiftUI
 
 /// Design tokens ported from the firmware `CLAUDE.md` aesthetic spec:
@@ -109,4 +108,3 @@ public enum ClawdmeterTheme {
         public static let redLinePulseHz: Double = 0.5
     }
 }
-#endif

@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import SwiftUI
 
 /// Cross-platform "Plan ready" card. Renders the structured plan text + a
@@ -165,4 +164,3 @@ public struct PlanCardView: View {
         Color(red: 0xD9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0)
     }
 }
-#endif

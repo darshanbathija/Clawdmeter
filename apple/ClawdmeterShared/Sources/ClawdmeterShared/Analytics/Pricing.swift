@@ -94,25 +94,15 @@ public final class Pricing: @unchecked Sendable {
         // instead of $4.5k.
         let inputTokens = tokens.inputTokens
         let boundary = rates.boundaryTokens
-        // P1-Shared-1: cache-read tokens occupy context-window budget the
-        // same as fresh input tokens, so they count toward the tier
-        // boundary check. Using inputTokens alone made a 150k-input +
-        // 60k-cache-read request stay in the below-tier rate even though
-        // its real context window was 210k. We still apply the above-tier
-        // rate only to the fresh input portion past the boundary; cache
-        // rates flip independently below.
-        let contextWindowTokens = inputTokens + tokens.cacheReadTokens
-        let hasAboveTier = rates.aboveBoundary != nil && contextWindowTokens > boundary
+        let hasAboveTier = rates.aboveBoundary != nil && inputTokens > boundary
         let aboveRates = rates.aboveBoundary
 
         var total: Decimal = 0
         if hasAboveTier, let above = aboveRates {
-            // Split fresh input only — the boundary measures total context
-            // window crossed, but cache-read is priced separately below.
-            let inputBelow = min(inputTokens, boundary)
-            let inputAbove = inputTokens > boundary ? inputTokens - boundary : 0
-            total += rates.inputPerToken * Decimal(inputBelow)
-            total += above.inputPerToken * Decimal(inputAbove)
+            let belowInput = min(inputTokens, boundary)
+            let aboveInput = inputTokens - boundary
+            total += rates.inputPerToken * Decimal(belowInput)
+            total += above.inputPerToken * Decimal(aboveInput)
         } else {
             // No tier flip — single rate applies to the full input count.
             total += rates.inputPerToken * Decimal(inputTokens)

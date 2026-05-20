@@ -176,11 +176,7 @@ public final class LiveActivityCoordinator: ObservableObject {
     private func postPushTokenJSON(
         host: String, port: Int, bearer: String, method: String, body: [String: String]
     ) async {
-        // P1-Mac-19: bracket raw IPv6 literals so URL(string:) parses the
-        // authority — Tailscale's `tailscale ip -6` and the pairing-URL
-        // host field hand us unbracketed addresses like `fd7a::1234`.
-        let safeHost = AgentControlClient.urlHostLiteral(host)
-        guard let url = URL(string: "http://\(safeHost):\(port)/live-activities/push-token") else { return }
+        guard let url = URL(string: "http://\(host):\(port)/live-activities/push-token") else { return }
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else { return }
         var req = URLRequest(url: url)
         req.httpMethod = method

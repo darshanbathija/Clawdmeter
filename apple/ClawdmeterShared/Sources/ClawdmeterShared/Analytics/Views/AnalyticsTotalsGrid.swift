@@ -1,4 +1,4 @@
-#if !os(watchOS) && canImport(SwiftUI)
+#if !os(watchOS)
 import SwiftUI
 
 /// The provider-keyed totals grid shown on both Mac and iOS. Iterates

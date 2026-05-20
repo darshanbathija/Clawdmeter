@@ -1,4 +1,4 @@
-#if !os(watchOS) && canImport(SwiftUI)
+#if !os(watchOS)
 import SwiftUI
 
 /// Per-repo $/% breakdown for the active window. Top 8 + optional "…N more"

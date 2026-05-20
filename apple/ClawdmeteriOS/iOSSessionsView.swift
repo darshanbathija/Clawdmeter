@@ -1031,25 +1031,11 @@ private struct OutsideSessionDetailView: View {
 }
 
 private struct SessionDetailView: View {
-    /// Seed session — used only when client.sessions doesn't have a live
-    /// entry for this id (e.g., immediately after archive or while a
-    /// refresh is in flight). Live reads should go through
-    /// `currentSession` so plan / goal / status updates propagate
-    /// without rebuilding this view.
     let session: AgentSession
     @ObservedObject var client: AgentControlClient
     @State private var viewMode: ViewMode = .chat
     /// Sessions v2 T40: chat store mirrors the daemon's chat snapshot.
     @StateObject private var chatStore: iOSChatStore
-
-    /// P1-Mac-20: derive live session state from `client.sessions` on each
-    /// render. The previous implementation captured `session` as `let`
-    /// and read mutable fields (planText, goal, archivedAt) off the
-    /// captured snapshot, so plan-mode / done / archive updates were
-    /// invisible until the user closed and re-opened the detail view.
-    private var currentSession: AgentSession {
-        client.sessions.first(where: { $0.id == session.id }) ?? session
-    }
     /// Tracks whether the chat scroll is at the tail so we know when to
     /// auto-scroll on new items vs. surface a "Jump to latest" CTA.
     @State private var liveChatPinnedToBottom: Bool = true
@@ -1121,7 +1107,7 @@ private struct SessionDetailView: View {
                 terminalView
             }
         }
-        .navigationTitle(currentSession.displayLabel)
+        .navigationTitle(session.displayLabel)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { iOSChatStoreCache.shared.protectSession(session.id) }
         .onDisappear { iOSChatStoreCache.shared.unprotectSession(session.id) }
@@ -1129,14 +1115,14 @@ private struct SessionDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     NavigationLink {
-                        iOSArtifactsPane(client: client, session: currentSession, chatStore: chatStore)
+                        iOSArtifactsPane(client: client, session: session, chatStore: chatStore)
                             .navigationTitle("Artifacts")
                             .navigationBarTitleDisplayMode(.inline)
                     } label: {
                         Label("Artifacts (\(chatStore.snapshot.artifactEntries.count))", systemImage: "paperclip")
                     }
                     Divider()
-                    if currentSession.archivedAt == nil {
+                    if session.archivedAt == nil {
                         Button("Archive session") {
                             Task { await client.archiveSession(id: session.id) }
                         }
@@ -1176,9 +1162,9 @@ private struct SessionDetailView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
                 List {
-                    if let planText = currentSession.planText, !planText.isEmpty {
+                    if let planText = session.planText, !planText.isEmpty {
                         PlanCardView(
-                            goal: currentSession.goal,
+                            goal: session.goal,
                             planSummary: planText,
                             files: [],
                             onApprove: {
@@ -1782,6 +1768,11 @@ private struct NewSessionSheet: View {
             await MainActor.run {
                 switch result {
                 case .delivered:
+                    isPresented = false
+                case .deliveredWithCodexResume:
+                    // v0.7.2: the Mac executed a Codex SDK resume on the
+                    // draft's codexThreadId. Close the sheet — the Mac's
+                    // composer will render the agent's response inline.
                     isPresented = false
                 case .macUnsupported(let v):
                     openOnMacUnsupportedAlert = "Your Mac is on wire version \(v); Open on Mac needs ≥\(AgentControlWireVersion.composeDraftMinimum). Update Clawdmeter on the Mac."

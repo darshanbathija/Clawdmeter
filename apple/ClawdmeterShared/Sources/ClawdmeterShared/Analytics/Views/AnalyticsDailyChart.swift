@@ -1,4 +1,4 @@
-#if !os(watchOS) && canImport(SwiftUI)
+#if !os(watchOS)
 import SwiftUI
 import Charts
 

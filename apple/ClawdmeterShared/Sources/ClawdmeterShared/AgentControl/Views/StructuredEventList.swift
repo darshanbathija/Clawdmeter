@@ -1,4 +1,3 @@
-#if canImport(SwiftUI)
 import SwiftUI
 
 /// Renders a vertical list of structured agent events (messages + tool
@@ -181,4 +180,3 @@ public struct StructuredEventList: View {
         #endif
     }
 }
-#endif

@@ -1,8 +1,5 @@
 import Foundation
-import OSLog
 import ClawdmeterShared
-
-private let trayLogger = Logger(subsystem: "com.clawdmeter.linux", category: "TrayPollLoop")
 
 /// Drives the AppIndicator gauge refresh at the 60s poll cadence.
 ///
@@ -50,11 +47,8 @@ public actor TrayPollLoop {
             let label = formatLabel(provider: provider, usage: snapshot)
             tray.setIcon(at: url, label: label)
         } catch {
-            // P2-Linux-2: render failed (tmpfs full / permissions / Cairo
-            // surface error). The previous icon stays, but emit a warning
-            // so a tray rendering regression isn't invisible — the prior
-            // TODO ("log via swift-log once wired") gets resolved here.
-            trayLogger.warning("Gauge render failed for \(self.provider.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            // Render failed (tmpfs full / permissions). Keep the previous
+            // icon; log via swift-log once wired.
         }
     }
 
