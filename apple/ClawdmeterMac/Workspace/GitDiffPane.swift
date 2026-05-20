@@ -50,8 +50,12 @@ final class GitDiffStore: ObservableObject {
     }
 
     deinit {
+        // P1-Mac-14: FD ownership lives entirely in the dispatch source's
+        // cancel handler. Closing here AND there created a double-close
+        // window: when deinit ran first, the kernel could hand the same
+        // fd number to a new socket before the cancel handler fired, and
+        // the late `close()` then killed that unrelated descriptor.
         watcher?.cancel()
-        if watchedFD != -1 { close(watchedFD) }
     }
 
     func start() {
@@ -271,11 +275,24 @@ final class GitDiffStore: ObservableObject {
     private nonisolated static func parseFile(_ lines: [String]) -> GitDiffFile? {
         guard let first = lines.first, first.hasPrefix("diff --git ") else { return nil }
         // Header parse: "diff --git a/path b/path"
-        let header = first.dropFirst("diff --git ".count)
-        let parts = header.split(separator: " ", maxSplits: 1).map(String.init)
+        //
+        // P1-Mac-14: paths may contain spaces, so we can't split on " " naively
+        // (a path like "my file.txt" splits the b-side away from itself). The
+        // shape is always `a/<path> b/<same path>` with a single ` b/` delimiter
+        // between the two halves, so anchor on ` b/` instead of whitespace.
+        let header = String(first.dropFirst("diff --git ".count))
         var postPath: String = ""
-        if let bPart = parts.last, bPart.hasPrefix("b/") {
-            postPath = String(bPart.dropFirst(2))
+        if let range = header.range(of: " b/"),
+           header[..<range.lowerBound].hasPrefix("a/") {
+            postPath = String(header[range.upperBound...])
+        } else {
+            // Fallback to the original split for unusual headers (e.g. no a/
+            // prefix, mergetool output) — better to render something than
+            // crash silently.
+            let parts = header.split(separator: " ", maxSplits: 1).map(String.init)
+            if let bPart = parts.last, bPart.hasPrefix("b/") {
+                postPath = String(bPart.dropFirst(2))
+            }
         }
         var oldPath: String? = nil
         var isNew = false
