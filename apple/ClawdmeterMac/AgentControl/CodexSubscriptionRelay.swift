@@ -34,6 +34,7 @@
 import Foundation
 import Combine
 import OSLog
+import ClawdmeterShared
 
 private let relayLogger = Logger(subsystem: "com.clawdmeter.mac", category: "CodexSubscriptionRelay")
 
@@ -389,7 +390,7 @@ public final class CodexSubscriptionRelay {
     /// thread_id and subscription_id on the handle so subsequent events
     /// without those fields can still be threaded back to the right
     /// turn.
-    private static func classify(json: [String: Any], handle: ProcessHandle) -> CodexRelayEvent {
+    nonisolated private static func classify(json: [String: Any], handle: ProcessHandle) -> CodexRelayEvent {
         let outerType = json["type"] as? String ?? ""
         var subscriptionId = json["subscriptionId"] as? String
         var threadId = json["threadId"] as? String

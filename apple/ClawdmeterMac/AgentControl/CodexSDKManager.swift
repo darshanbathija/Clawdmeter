@@ -146,6 +146,140 @@ public final class CodexSDKManager {
         lastProvisioningError = nil
     }
 
+    // MARK: - One-shot resume (X1 compose-draft handoff)
+
+    /// One-shot Codex SDK resume. Spawns the sidecar with
+    /// `agent: "resume"`, sends `{threadId, prompt, workingDirectory}`,
+    /// reads the `resume_result` event, returns the parsed Turn data.
+    /// Used by the X1 cross-Apple handoff: iPhone posts a compose-draft
+    /// with `codexThreadId` set; the Mac daemon dispatches here to
+    /// continue that thread with the new prompt without keeping a
+    /// long-running stream.
+    ///
+    /// Throws if the SDK isn't provisioned. Caller surfaces the
+    /// "Toggle SDK mode in Settings → Codex SDK" CTA.
+    public func runResume(
+        threadId: String,
+        prompt: String,
+        workingDirectory: String,
+        timeout: TimeInterval = 90
+    ) async throws -> ResumeResult {
+        guard isProvisioned else { throw SidecarError.notProvisioned(detail: "Codex SDK not installed") }
+        guard let nodeBinary = locateNode() else {
+            throw SidecarError.notProvisioned(detail: "node binary not found on PATH")
+        }
+        let mainJS = appSupportDir().appendingPathComponent("main.mjs", isDirectory: false)
+        guard FileManager.default.fileExists(atPath: mainJS.path) else {
+            throw SidecarError.notProvisioned(detail: "AppSupport main.mjs missing — re-provision required")
+        }
+
+        let process = Process()
+        process.executableURL = nodeBinary
+        process.arguments = [mainJS.path]
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+
+        let payload: [String: Any] = [
+            "agent": "resume",
+            "threadId": threadId,
+            "prompt": prompt,
+            "workingDirectory": workingDirectory,
+        ]
+        let payloadData = try JSONSerialization.data(withJSONObject: payload)
+        var withNewline = payloadData
+        withNewline.append(0x0a)
+        try stdin.fileHandleForWriting.write(contentsOf: withNewline)
+        try? stdin.fileHandleForWriting.close()
+
+        // Read stdout until we see the `resume_result` event or hit timeout.
+        let deadline = Date().addingTimeInterval(timeout)
+        var output = Data()
+        var result: ResumeResult?
+        var failure: String?
+        while Date() < deadline {
+            let chunk = stdout.fileHandleForReading.availableData
+            if chunk.isEmpty {
+                if !process.isRunning { break }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                continue
+            }
+            output.append(chunk)
+            // Try to parse complete JSON-lines as they come in.
+            while let lf = output.firstIndex(of: 0x0a) {
+                let lineBytes = output.subdata(in: output.startIndex..<lf)
+                output.removeSubrange(output.startIndex...lf)
+                guard !lineBytes.isEmpty,
+                      let json = try? JSONSerialization.jsonObject(with: lineBytes) as? [String: Any]
+                else { continue }
+                if let type = json["type"] as? String, type == "resume_result" {
+                    // Items are JSON-encoded as a single string so the
+                    // ResumeResult value remains Sendable (raw `[[String:
+                    // Any]]` isn't). Callers that need to inspect items
+                    // deeply re-parse `itemsJSON` themselves; the X1
+                    // path mostly cares about `finalResponse`.
+                    let itemsJSON: String = {
+                        guard let arr = json["items"] as? [Any],
+                              let data = try? JSONSerialization.data(withJSONObject: arr),
+                              let s = String(data: data, encoding: .utf8) else {
+                            return "[]"
+                        }
+                        return s
+                    }()
+                    result = ResumeResult(
+                        threadId: json["threadId"] as? String ?? threadId,
+                        finalResponse: json["finalResponse"] as? String ?? "",
+                        itemsJSON: itemsJSON,
+                        usage: parseUsage(from: json["usage"] as? [String: Any])
+                    )
+                    break
+                }
+                if let type = json["type"] as? String, type == "error" {
+                    failure = (json["msg"] as? String) ?? "Codex SDK resume failed"
+                    break
+                }
+            }
+            if result != nil || failure != nil { break }
+        }
+        process.terminate()
+        if let result { return result }
+        if let failure { throw SidecarError.probeFailed(detail: failure) }
+        throw SidecarError.probeFailed(detail: "Codex SDK resume timed out after \(Int(timeout))s")
+    }
+
+    private func parseUsage(from dict: [String: Any]?) -> ResumeUsage? {
+        guard let dict else { return nil }
+        return ResumeUsage(
+            inputTokens: dict["input_tokens"] as? Int ?? 0,
+            cachedInputTokens: dict["cached_input_tokens"] as? Int ?? 0,
+            outputTokens: dict["output_tokens"] as? Int ?? 0,
+            reasoningOutputTokens: dict["reasoning_output_tokens"] as? Int ?? 0
+        )
+    }
+
+    /// Structured result of `runResume()`. Mirrors the SDK's Turn type.
+    /// `itemsJSON` is the raw JSON array as a string — keep ResumeResult
+    /// `Sendable` (any `[[String: Any]]` isn't). Callers that need
+    /// structured items re-decode `itemsJSON` themselves.
+    public struct ResumeResult: Sendable {
+        public let threadId: String
+        public let finalResponse: String
+        public let itemsJSON: String
+        public let usage: ResumeUsage?
+    }
+
+    public struct ResumeUsage: Equatable, Sendable {
+        public let inputTokens: Int
+        public let cachedInputTokens: Int
+        public let outputTokens: Int
+        public let reasoningOutputTokens: Int
+    }
+
     // MARK: - Provisioning steps
 
     /// `~/Library/Application Support/Clawdmeter/codex-sdk/`. Created
