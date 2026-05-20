@@ -125,7 +125,17 @@ public actor TmuxControlClient {
                 var localParser = ControlModeParser()
                 while true {
                     let n = read(readerPtyFd, &buf, buf.count)
-                    if n <= 0 { break }
+                    if n < 0 {
+                        // P2-Mac-9: previously the read loop fell through to
+                        // `if n <= 0 { break }` for both EOF (n==0) and error
+                        // (n<0), silently treating signal-interrupted/transient
+                        // errors the same as a clean exit. Log the errno
+                        // before exit so PTY misbehavior is debuggable.
+                        let err = errno
+                        tmuxLogger.warning("tmux PTY read error errno=\(err) — exiting read loop")
+                        break
+                    }
+                    if n == 0 { break }
                     localParser.feed(buf[0..<n])
                     while let frame = localParser.nextFrame() {
                         continuation.yield(frame)
