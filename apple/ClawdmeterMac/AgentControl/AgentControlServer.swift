@@ -515,6 +515,25 @@ public final class AgentControlServer {
             )
             wsChannels[ObjectIdentifier(connection)] = chatChannel
             chatChannel.start()
+        case "codex-stream-subscribe":
+            // v0.7.4: live SDK observation. Each event the Codex SDK
+            // observer sidecar emits flows here as a JSON text frame.
+            // Multi-subscriber by construction — the local ingestor can
+            // be reading the same session in parallel without contending.
+            guard let sessionIdString = envelope.sessionId,
+                  let sessionId = UUID(uuidString: sessionIdString),
+                  let session = registry.session(id: sessionId)
+            else {
+                sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
+                return
+            }
+            let codexChannel = CodexStreamWebSocketChannel(
+                connection: connection,
+                session: session,
+                relay: CodexSubscriptionRelay.shared
+            )
+            wsChannels[ObjectIdentifier(connection)] = codexChannel
+            codexChannel.start()
         default:
             sendWSClose(on: connection, code: .protocolCode(.unsupportedData))
         }

@@ -1558,6 +1558,11 @@ private struct NewSessionSheet: View {
     @State private var runAsABPair: Bool = false
     @State private var isStarting: Bool = false
     @State private var openOnMacUnsupportedAlert: String?
+    /// v0.7.4 handoff UX: when the Mac executed a Codex SDK resume on
+    /// the draft's codexThreadId, surface the agent's response inline
+    /// via a sheet instead of silently dismissing. Identifiable struct
+    /// so `.sheet(item:)` knows when to present.
+    @State private var codexResumeResult: CodexResumeResult?
     /// Phase 8: pre-flight cost + weekly-cap estimate. Refreshes when
     /// any input the daemon would care about changes (repo, agent,
     /// model, effort, goal length). Debounced via the .task(id:) below.
@@ -1672,6 +1677,16 @@ private struct NewSessionSheet: View {
                    ),
                    actions: { Button("OK", role: .cancel) { openOnMacUnsupportedAlert = nil } },
                    message: { Text(openOnMacUnsupportedAlert ?? "") })
+            // v0.7.4: present the SDK-resumed response inline when the Mac
+            // returns `.deliveredWithCodexResume`. Dismissing the sheet
+            // also closes NewSession (we're done — the response is read).
+            .sheet(item: $codexResumeResult, onDismiss: {
+                isPresented = false
+            }) { result in
+                CodexResumeResultSheet(result: result) {
+                    codexResumeResult = nil
+                }
+            }
         }
     }
 
@@ -1783,15 +1798,82 @@ private struct NewSessionSheet: View {
                 switch result {
                 case .delivered:
                     isPresented = false
-                case .deliveredWithCodexResume:
-                    // v0.7.2: the Mac executed a Codex SDK resume on the
-                    // draft's codexThreadId. Close the sheet — the Mac's
-                    // composer will render the agent's response inline.
-                    isPresented = false
+                case .deliveredWithCodexResume(let threadId, let response):
+                    // v0.7.4: surface the agent's response inline. Open a
+                    // result sheet on top of NewSession; user can read the
+                    // response and copy the threadId for a follow-up
+                    // draft if they want to continue the same SDK turn.
+                    codexResumeResult = CodexResumeResult(
+                        threadId: threadId,
+                        response: response
+                    )
                 case .macUnsupported(let v):
                     openOnMacUnsupportedAlert = "Your Mac is on wire version \(v); Open on Mac needs ≥\(AgentControlWireVersion.composeDraftMinimum). Update Clawdmeter on the Mac."
                 case .failed(let msg):
                     openOnMacUnsupportedAlert = msg
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Codex SDK resume result (v0.7.4)
+
+/// Identifiable payload for `.sheet(item:)` so SwiftUI knows when to
+/// present + dismiss. Set on `.deliveredWithCodexResume`.
+private struct CodexResumeResult: Identifiable, Equatable {
+    let id = UUID()
+    let threadId: String
+    let response: String
+}
+
+/// Sheet shown after the Mac executes a Codex SDK resume turn. Displays
+/// the agent's response text and offers a "Continue on Mac" deep link.
+private struct CodexResumeResultSheet: View {
+    let result: CodexResumeResult
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.green)
+                        Text("Mac executed your prompt")
+                            .font(.headline)
+                    }
+                    Text("Thread \(String(result.threadId.prefix(8)))…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Divider()
+                    Text(result.response.isEmpty
+                         ? "(no response text)"
+                         : result.response)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Divider()
+                    Button {
+                        // Cross-device handoff (focus session on Mac) is
+                        // deferred — needs Handoff/Universal Links setup
+                        // with an apple.com domain. For now expose the
+                        // threadId so the user can paste it into a
+                        // follow-up draft to continue the same SDK turn.
+                        UIPasteboard.general.string = result.threadId
+                    } label: {
+                        Label("Copy thread ID", systemImage: "doc.on.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+            }
+            .navigationTitle("Codex response")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: onDismiss)
                 }
             }
         }

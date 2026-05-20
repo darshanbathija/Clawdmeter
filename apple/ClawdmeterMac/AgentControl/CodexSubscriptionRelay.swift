@@ -93,6 +93,12 @@ public struct CodexRelayEvent: Equatable, Sendable {
         lhs.threadId == rhs.threadId &&
         lhs.receivedAt == rhs.receivedAt
     }
+
+    /// Returns the raw JSON payload. The struct declares Sendable but
+    /// `[String: Any]` isn't formally Sendable; this accessor exists for
+    /// downstream consumers that want a non-property access pattern,
+    /// matching `event.rawDict()` shape the ingestor + WS channel use.
+    public func rawDict() -> [String: Any] { raw }
 }
 
 /// Handle returned by `start()`. Holds the events publisher and a
@@ -135,7 +141,28 @@ public final class CodexSubscriptionRelay {
     /// Active sidecar processes keyed by session id.
     private var active: [UUID: ProcessHandle] = [:]
 
+    /// v0.7.4: multi-subscriber fanout. Each session gets a PassthroughSubject
+    /// that the stdout reader feeds in addition to the legacy AsyncStream
+    /// continuation in `start()`'s return value. iOS WS channel + Mac
+    /// SessionChatStore ingestor both subscribe via `subscribe(sessionId:)`
+    /// without contending for the single AsyncStream slot.
+    private var subjects: [UUID: PassthroughSubject<CodexRelayEvent, Never>] = [:]
+
     public init() {}
+
+    /// Subscribe to a session's relay events via Combine. Multiple subscribers
+    /// per session id are supported; the subject is created lazily and lives
+    /// until `stop(sessionId:)` is called.
+    public func subscribe(sessionId: UUID) -> AnyPublisher<CodexRelayEvent, Never> {
+        subject(for: sessionId).eraseToAnyPublisher()
+    }
+
+    private func subject(for sessionId: UUID) -> PassthroughSubject<CodexRelayEvent, Never> {
+        if let s = subjects[sessionId] { return s }
+        let s = PassthroughSubject<CodexRelayEvent, Never>()
+        subjects[sessionId] = s
+        return s
+    }
 
     // MARK: - Public API
 
@@ -310,6 +337,11 @@ public final class CodexSubscriptionRelay {
             relayLogger.info("Codex relay force-terminated sidecar for session=\(sessionId.uuidString, privacy: .public) after 3s")
         }
         handle.continuation.finish()
+        // v0.7.4: complete the multi-subscriber subject so downstream
+        // ingestor + WS channel sinks tear down cleanly.
+        if let subject = subjects.removeValue(forKey: sessionId) {
+            subject.send(completion: .finished)
+        }
     }
 
     /// Test/teardown helper. Stops all active sidecars synchronously.
@@ -382,6 +414,12 @@ public final class CodexSubscriptionRelay {
                 }
                 let event = Self.classify(json: json, handle: handle)
                 handle.continuation.yield(event)
+                // v0.7.4: fan out to Combine subscribers (ingestor + WS
+                // channel). MainActor hop because `subjects` is isolated
+                // to the relay actor; `send` doesn't block.
+                Task { @MainActor [weak self] in
+                    self?.subjects[sessionId]?.send(event)
+                }
             }
         }
     }

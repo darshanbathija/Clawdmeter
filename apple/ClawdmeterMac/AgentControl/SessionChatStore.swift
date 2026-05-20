@@ -161,6 +161,33 @@ public final class SessionChatStore: ObservableObject {
         Task { [staging] in await staging.setPlanText(text) }
     }
 
+    /// v0.7.4: ingest Codex SDK stream events into the same staging pipeline
+    /// JSONL tail uses, so SDK observation flows into the existing iOS
+    /// `chat-subscribe` WS feed without a separate channel.
+    /// Caller (CodexSDKEventIngestor) maps SDK events into ChatMessage and
+    /// hands them here with whatever token deltas turn.completed reported.
+    public func appendSDKMessages(
+        _ messages: [ChatMessage],
+        at timestamp: Date = Date(),
+        deltaInputTokens: Int = 0,
+        deltaOutputTokens: Int = 0,
+        deltaCacheCreationTokens: Int = 0,
+        deltaCacheReadTokens: Int = 0,
+        model: String? = nil
+    ) {
+        guard !messages.isEmpty else { return }
+        let line = ParsedLine(
+            timestamp: timestamp,
+            messages: messages,
+            deltaInputTokens: deltaInputTokens,
+            deltaOutputTokens: deltaOutputTokens,
+            deltaCacheCreationTokens: deltaCacheCreationTokens,
+            deltaCacheReadTokens: deltaCacheReadTokens,
+            model: model
+        )
+        Task { [staging] in await staging.ingest(line) }
+    }
+
     public let sessionId: UUID
     private let sessionFileURL: URL
     private var tail: JSONLTail?
