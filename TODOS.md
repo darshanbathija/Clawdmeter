@@ -21,12 +21,21 @@ follow-up that didn't make the v2.0 ship but is worth picking up.
 > ConversationFilter, and the cross-platform shared container all
 > deferred to v0.6 / v1.1 follow-ups below.
 
-## Audit-track follow-ups (bugfix/audit-fixes-v2, 2026-05-20)
+## Audit-track follow-ups — MOSTLY RESOLVED in v0.7.7 (2026-05-20)
 
-These are deferrals from the 40-commit audit-track campaign on
-`bugfix/audit-fixes-v2`. The campaign closed the high-severity findings
-(P0/P1/P2/codex-1..9). The items below are the lower-severity / refactor
-opportunities surfaced by `/review` after the campaign.
+Five sub-items, four resolved in v0.7.7:
+
+- **Stub-flag escape hatches** — STILL OPEN (Phase 3/4/7 work).
+- **5 missing regression tests** — 4 shipped in v0.7.7 via new Mac
+  XCTest target; 5th (`PastedAnthropicTokenProvider`) shipped in v0.7.4.
+- **Path-validator duplication** — RESOLVED via `PathValidator` in
+  ClawdmeterShared (v0.7.7).
+- **Fire-once duplication** — RESOLVED via `FireOnce` in
+  ClawdmeterShared (v0.7.7).
+- **`handleGetArtifact` TOCTOU** — RESOLVED in v0.7.4 (O_NOFOLLOW +
+  fstat-from-fd).
+
+Original deferral text retained below for historical reference.
 
 ### Stub-flag escape hatches
 - **What**: three env-flagged bypasses landed during the campaign without a

@@ -4,6 +4,94 @@ All notable changes to Clawdmeter are recorded here. Marketing version
 is `MARKETING_VERSION` in `apple/project.yml`; build number is
 `CURRENT_PROJECT_VERSION` in the same file (source of truth for the DMG).
 
+## [0.7.7 build 53] - 2026-05-20
+
+Closes every remaining v0.6.0 plan deferral and every v0.7.4
+audit-track follow-up. Five themed blocks:
+
+### Added (v0.6.0 plan D3 completion)
+
+- **Settings → Antigravity tab.** `AntigravitySDKSettingsView` makes
+  the `clawdmeter.antigravity.sdkMode` toggle discoverable. Mirrors
+  `CodexSDKSettingsView`'s shape so the two SDK modes feel symmetric.
+  All plumbing already existed (`AntigravitySidecarManager.shared` +
+  backing UserDefaults bool + daemon-read); v0.7.7 adds the UI.
+
+### Added (v0.6.0 plan T3 completion)
+
+- **`SidecarAskCoordinator` + `/internal/sidecar-ask/<uuid>/decide`.**
+  Cross-surface `ask_user(...)` race protection for the Antigravity
+  SDK helper agents. First decision wins; second returns HTTP 409
+  with `{prior, priorSource}`; 60s timeout defaults to `deny`. Mac
+  inline calls the actor directly; iPhone surface POSTs. Decisions
+  recorded to `AuditLog` under the new `sidecar-ask` kind.
+
+### Refactored (audit-track consolidation)
+
+- **`PathValidator`** in `ClawdmeterShared` — consolidates the three
+  near-clone validators (`isValidRepoKey`, `isValidJsonlPath`,
+  `isSafeArtifactPath`) into a single composable helper. Mac daemon
+  + iOS client delegate now ~3 lines each.
+- **`FireOnce`** in `ClawdmeterShared` — consolidates the two
+  near-clone NSLock+bool primitives that lived as `ResumeOnce`
+  (ShellRunner) and `BGTaskCompletionGuard` (ClawdmeteriOSApp).
+  Mac's `ResumeOnce` is now a typealias; iOS's
+  `BGTaskCompletionGuard` is a thin wrapper.
+
+### Added (audit-track test coverage)
+
+- **Mac XCTest target** (`ClawdmeterMacTests`). New xcodegen target
+  hosted by ClawdmeterMac; closes the v0.7.4 deferral that flagged
+  "4 Mac-only regression tests need a new XCTest target". 29 tests
+  across 4 suites:
+  - `PathValidatorMacTests` (11) — daemon-side path safety,
+    including the codex-7 symlink-escape regression.
+  - `TailscaleWhoisIpOnlyTests` (4) — the load-bearing
+    bare-IPv6 round-trip case that guards the P2-Mac-4 rollback.
+  - `TmuxControlClientValidationTests` (9) — control-byte rejection
+    for the P1-Mac-6 tmux command-injection guard. Extracts
+    `validateArgs` as a static so the test can run without a PTY.
+  - `SidecarAskCoordinatorTests` (5) — first-wins, lost-on-second,
+    timeout-defaults-to-deny, late-decide-loses, unknown-prompt.
+
+  ClawdmeterShared swift-test count unchanged at 460. Mac XCTest
+  adds 29 → 489 total across the project.
+
+### Added (v0.7.4 deferral — cross-device handoff)
+
+- **NSUserActivity Handoff for "Continue on Mac"** on the Codex
+  resume sheet. iPhone advertises
+  `com.clawdmeter.continue-codex-thread` while the sheet is up;
+  Mac's NSApplicationDelegate continues the activity, brings the
+  dashboard forward, and broadcasts a notification with the
+  threadId. Uses Continuity (same Apple ID + same Wi-Fi); no
+  apple.com domain or Universal Links setup required. "Copy
+  thread ID" demoted to a secondary button.
+
+### Plan status after v0.7.7
+
+| v0.6.0 plan item | Status |
+|---|---|
+| 10 commits (1-10) | All shipped (v0.6.0) |
+| T1 extract-antigravity-proto.sh | Moot (proto path abandoned) |
+| T2 LanguageServerClient.discoverLive | Shipped (v0.6.0) |
+| T3 SidecarAskCoordinator | Shipped (v0.7.7) |
+| T4 BrainLinkCache LRU-2 | Shipped (v0.6.0) |
+| T5 BrainPlanParser awaitingFirstTurn | Shipped (v0.6.0) |
+| T6 LanguageServerClient loopback TLS | Shipped (v0.6.0) |
+| T7 typed WatchPlanBridge.Payload | Shipped (v0.6.0) |
+| T8 pytest framework | Shipped (v0.6.0) |
+| T9 bounded transcript 1KB read | Shipped (v0.6.0) |
+| T10 ConversationDecodeScope.totalsOnly | Moot (proto pivot) |
+| D3 Settings SDK toggle UI | Shipped (v0.7.7) |
+
+| v0.7.4 deferral | Status |
+|---|---|
+| Mac-only regression tests (4) | Shipped (v0.7.7) |
+| Path-validator consolidation | Shipped (v0.7.7) |
+| Fire-once helper consolidation | Shipped (v0.7.7) |
+| Cross-device Continue-on-Mac | Shipped (v0.7.7) |
+
 ## [0.7.6 build 52] - 2026-05-20
 
 ### Added
