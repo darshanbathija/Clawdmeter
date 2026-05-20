@@ -324,14 +324,17 @@ public final class CodexSDKManager {
     // MARK: - Binary discovery
 
     /// Locates the main.mjs source-of-truth on disk. Production .app
-    /// bundles ship it under Contents/Resources; dev builds run from
-    /// the repo where it lives at tools/clawdmeter-codex-sdk/main.mjs.
+    /// bundles ship it as `Contents/Resources/main.mjs` (via the
+    /// project.yml `buildPhase: resources` declaration); dev builds
+    /// run from the repo where it lives at
+    /// tools/clawdmeter-codex-sdk/main.mjs.
     func locateMainMJSSource() -> URL? {
-        // First try the app bundle's Resources/ — this is the prod path.
-        if let bundlePath = Bundle.main.url(forResource: "codex-sdk-main", withExtension: "mjs") {
+        // First try the app bundle's Resources/. xcodegen copies
+        // tools/clawdmeter-codex-sdk/main.mjs as Resources/main.mjs.
+        if let bundlePath = Bundle.main.url(forResource: "main", withExtension: "mjs") {
             return bundlePath
         }
-        // Dev: walk up from the cwd.
+        // Dev: walk up from the cwd to find the repo-relative source.
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         var dir = cwd
         for _ in 0..<8 {

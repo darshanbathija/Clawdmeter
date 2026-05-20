@@ -42,6 +42,7 @@
 		3C1B58E34AA8D8FC4831DBAF /* ClawdmeterMacWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748E1F1BC9C3BDE9E666458C /* ClawdmeterMacWidgets.swift */; };
 		3D153FBD1EF5FB96D68B6AA4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1C3B5FDF4AB46F3A7B4FC6 /* SettingsView.swift */; };
 		3D7C8FFD8D4435D633FE91F1 /* AgentEventStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF9881A0E3387C6A605D8D83 /* AgentEventStream.swift */; };
+		3E0C51486BA7D95939273B67 /* main.mjs in Resources */ = {isa = PBXBuildFile; fileRef = B251462C091357CBD6482B37 /* main.mjs */; };
 		3E4ECC9D7E017C2E27E605F5 /* ComposerInputCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD788C3119613C920DFB7B0 /* ComposerInputCore.swift */; };
 		3FEC8086C160D365D5C211B0 /* AttachmentChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0273C0880168A1CE3A2927 /* AttachmentChip.swift */; };
 		40D596319B0D0203AE7F1B84 /* ClawdmeterMacWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 07E588070BA9CBA723BA60EC /* ClawdmeterMacWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -145,6 +146,7 @@
 		F2A463341EA0924E426712F0 /* MentionPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797168CA4C5227800441FD18 /* MentionPicker.swift */; };
 		F4C4D33C87EA884DB52B4654 /* UsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10D345820EF090F6426A9E0 /* UsageModel.swift */; };
 		F54AA92455AB651F391E0FB3 /* AntigravityPlanPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88501FECEB4876BDEAAF06B7 /* AntigravityPlanPane.swift */; };
+		F8FA8741CD3BB21488BF313B /* Vendor in Resources */ = {isa = PBXBuildFile; fileRef = 3F390A788ACC767845A4786C /* Vendor */; };
 		F945360BFE5147E7FAF7250C /* ProvidersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945D7D6CDA1A0EAB8C5ABD29 /* ProvidersSettingsView.swift */; };
 		FAAF4E8871EF0B2D53A935A7 /* ClawdmeterShared in Frameworks */ = {isa = PBXBuildFile; productRef = 1B6F19371B0A6808926B1EA9 /* ClawdmeterShared */; };
 		FC09E87265C8C2DFEF77D40F /* MacTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68EF91556CDC1149B2B2C480 /* MacTerminalView.swift */; };
@@ -248,6 +250,7 @@
 		3AC85897BEF981BD4BAEB79F /* AppearanceMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceMode.swift; sourceTree = "<group>"; };
 		3E0AF7F2D36777237BB36333 /* PermissionModeChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionModeChip.swift; sourceTree = "<group>"; };
 		3F1627364A3A4398D5A45B4A /* JSONLTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONLTail.swift; sourceTree = "<group>"; };
+		3F390A788ACC767845A4786C /* Vendor */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Vendor; path = ClawdmeterMac/Resources/Vendor; sourceTree = SOURCE_ROOT; };
 		41B60D6E8F440791CA97B015 /* CodexLogo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CodexLogo.png; sourceTree = "<group>"; };
 		431A968EFD55C9DDC919219D /* AntigravityTaskComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityTaskComplication.swift; sourceTree = "<group>"; };
 		44830246BE8DE33251B9CE1B /* ClawdmeterMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdmeterMacApp.swift; sourceTree = "<group>"; };
@@ -320,6 +323,7 @@
 		AC90C2ABAFB600289ACFF55D /* iOSTerminalTabsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSTerminalTabsView.swift; sourceTree = "<group>"; };
 		AF71122468E94982651161D9 /* AutopilotChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotChip.swift; sourceTree = "<group>"; };
 		AF9881A0E3387C6A605D8D83 /* AgentEventStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentEventStream.swift; sourceTree = "<group>"; };
+		B251462C091357CBD6482B37 /* main.mjs */ = {isa = PBXFileReference; path = main.mjs; sourceTree = "<group>"; };
 		B53A23CB4E962050EF7971CB /* GitDiffPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitDiffPane.swift; sourceTree = "<group>"; };
 		B6C8F116E380DC4E1696BCFE /* iOSPRPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSPRPane.swift; sourceTree = "<group>"; };
 		BC9DC6C356E49170FC1FE84C /* AgentControlServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentControlServer.swift; sourceTree = "<group>"; };
@@ -547,6 +551,13 @@
 			path = Composer;
 			sourceTree = "<group>";
 		};
+		4A2AC387B85935274B6855C9 /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Vendor;
+			sourceTree = "<group>";
+		};
 		545B0518B5EA26E2242B825F /* ClawdmeterMacWidgets */ = {
 			isa = PBXGroup;
 			children = (
@@ -554,6 +565,14 @@
 				FE54789A40285BD3DFE4CF99 /* Resources */,
 			);
 			path = ClawdmeterMacWidgets;
+			sourceTree = "<group>";
+		};
+		60E0F76D19BCC7D3DB006F73 /* tools */ = {
+			isa = PBXGroup;
+			children = (
+				C62AD663028857DAAB97D5A3 /* clawdmeter-codex-sdk */,
+			);
+			path = tools;
 			sourceTree = "<group>";
 		};
 		6B3807FF286F36DAAF6706D4 /* Workspace */ = {
@@ -578,9 +597,19 @@
 			path = Workspace;
 			sourceTree = "<group>";
 		};
+		748EB3AE0A0D4FECD545CF52 /* Clawdmeter */ = {
+			isa = PBXGroup;
+			children = (
+				60E0F76D19BCC7D3DB006F73 /* tools */,
+			);
+			name = Clawdmeter;
+			path = ..;
+			sourceTree = "<group>";
+		};
 		8355AE2A6C5D497C97998BEB = {
 			isa = PBXGroup;
 			children = (
+				748EB3AE0A0D4FECD545CF52 /* Clawdmeter */,
 				C290AE49FDFD964D084DB555 /* ClawdmeteriOS */,
 				422FDAA9460ED016123451B3 /* ClawdmeteriOSWidgets */,
 				472FCE6739E3CBFA1F0B7D11 /* ClawdmeterMac */,
@@ -650,6 +679,14 @@
 			path = ClawdmeteriOS;
 			sourceTree = "<group>";
 		};
+		C62AD663028857DAAB97D5A3 /* clawdmeter-codex-sdk */ = {
+			isa = PBXGroup;
+			children = (
+				B251462C091357CBD6482B37 /* main.mjs */,
+			);
+			path = "clawdmeter-codex-sdk";
+			sourceTree = "<group>";
+		};
 		D520BCF1F836E478A167B219 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -669,6 +706,8 @@
 				989678078117646A9327BB0B /* ClaudeLogo.svg */,
 				41B60D6E8F440791CA97B015 /* CodexLogo.png */,
 				61DCEB1020CBB0E324C60959 /* GeminiLogo.svg */,
+				3F390A788ACC767845A4786C /* Vendor */,
+				4A2AC387B85935274B6855C9 /* Vendor */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -759,6 +798,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2D3E2AF62F9B6A0F3D439ED6 /* Build configuration list for PBXNativeTarget "ClawdmeterMac" */;
 			buildPhases = (
+				F4B99E1DB1C725C5440F6D21 /* Download bundled Node (if missing) */,
 				2F4AE07AD7834EDEEC7B2479 /* Sources */,
 				690B143B6DBBCC6BB24A0180 /* Resources */,
 				349406630A509848EE27C4B5 /* Frameworks */,
@@ -916,10 +956,34 @@
 				4A027F14FB57C10128699164 /* ClaudeLogo.svg in Resources */,
 				C97F41751616AF2672BAA590 /* CodexLogo.png in Resources */,
 				389C34543E4E3E857E98DC40 /* GeminiLogo.svg in Resources */,
+				F8FA8741CD3BB21488BF313B /* Vendor in Resources */,
+				3E0C51486BA7D95939273B67 /* main.mjs in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F4B99E1DB1C725C5440F6D21 /* Download bundled Node (if missing) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Download bundled Node (if missing)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/ClawdmeterMac/Resources/Vendor/node/bin/node",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CLAWDMETER_SKIP_BUNDLED_NODE:-0}\" = \"1\" ]; then\n  echo \"Skipping bundled Node download (CLAWDMETER_SKIP_BUNDLED_NODE=1)\"\n  exit 0\nfi\nREPO_ROOT=\"$(cd \"$SRCROOT/..\" && pwd)\"\nif [ ! -x \"$REPO_ROOT/apple/ClawdmeterMac/Resources/Vendor/node/bin/node\" ]; then\n  \"$REPO_ROOT/tools/download-bundled-node.sh\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2F4AE07AD7834EDEEC7B2479 /* Sources */ = {
