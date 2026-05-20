@@ -158,7 +158,11 @@ struct ModelEffortPopover: View {
     }
 
     private var modelsForAgent: [ModelCatalogEntry] {
-        agent == .claude ? catalog.claude : catalog.codex
+        switch agent {
+        case .claude: return catalog.claude
+        case .codex:  return catalog.codex
+        case .gemini: return catalog.gemini
+        }
     }
 
     @ViewBuilder

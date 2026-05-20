@@ -26,7 +26,7 @@ struct ModelPicker: View {
     var body: some View {
         Menu {
             // Header showing the current provider.
-            Section(agent == .claude ? "Claude Code" : "Codex") {
+            Section(providerSectionTitle) {
                 ForEach(modelsForAgent) { entry in
                     Button {
                         onSelect(entry)
@@ -78,6 +78,14 @@ struct ModelPicker: View {
         case .claude: return catalog.claude
         case .codex:  return catalog.codex
         case .gemini: return catalog.gemini
+        }
+    }
+
+    private var providerSectionTitle: String {
+        switch agent {
+        case .claude: return "Claude Code"
+        case .codex:  return "Codex"
+        case .gemini: return "Gemini"
         }
     }
 
