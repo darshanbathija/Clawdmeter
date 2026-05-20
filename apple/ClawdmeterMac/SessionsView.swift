@@ -154,6 +154,7 @@ struct NewSessionMacSheet: View {
         case .commandFailed(let s): return "tmux: \(s)"
         case .serverExited: return "tmux server exited"
         case .ptyClosed: return "PTY closed unexpectedly"
+        case .invalidArgument(let s): return "tmux: invalid argument — \(s)"
         }
     }
 }
