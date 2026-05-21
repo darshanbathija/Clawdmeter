@@ -444,6 +444,12 @@ public final class DaemonChatStoreRegistry {
         let cutoff = Date().addingTimeInterval(-Self.idleEvictionInterval)
         let evictableIds = entries.compactMap { (id, entry) -> UUID? in
             guard entry.subscriberCount == 0, entry.lastTouchedAt < cutoff else { return nil }
+            // F1 guard: an awaiting permission prompt means a daemon-side
+            // continuation is parked waiting for the user. Evicting would
+            // wipe the @Published prompt state, the UI would disappear,
+            // and the next prompt or send would hang forever on the
+            // un-resumed continuation. Keep the store resident.
+            guard entry.store.pendingPermissionPrompt == nil else { return nil }
             return id
         }
         for id in evictableIds {
@@ -451,6 +457,7 @@ public final class DaemonChatStoreRegistry {
         }
         let evictablePaths = pathEntries.compactMap { (url, entry) -> URL? in
             guard entry.subscriberCount == 0, entry.lastTouchedAt < cutoff else { return nil }
+            guard entry.store.pendingPermissionPrompt == nil else { return nil }
             return url
         }
         for url in evictablePaths {
@@ -475,10 +482,10 @@ public final class DaemonChatStoreRegistry {
             case path(URL)
         }
         var idleSorted: [(Key, Date)] = []
-        for (id, entry) in entries where entry.subscriberCount == 0 {
+        for (id, entry) in entries where entry.subscriberCount == 0 && entry.store.pendingPermissionPrompt == nil {
             idleSorted.append((.session(id), entry.lastTouchedAt))
         }
-        for (url, entry) in pathEntries where entry.subscriberCount == 0 {
+        for (url, entry) in pathEntries where entry.subscriberCount == 0 && entry.store.pendingPermissionPrompt == nil {
             idleSorted.append((.path(url), entry.lastTouchedAt))
         }
         idleSorted.sort { $0.1 < $1.1 }
@@ -501,7 +508,12 @@ public final class DaemonChatStoreRegistry {
         registryLogger.info("evicted path=\(url.path, privacy: .public) pathResident=\(self.pathEntries.count)")
     }
 
-    private func evict(sessionId: UUID) {
+    /// Force-evict a single session entry. v0.8 F3: handleDeleteSession
+    /// calls this so the registry doesn't keep a stale store around after
+    /// the session is gone — without the explicit call, the entry only
+    /// drops on the next 60s sweep, and any path-keyed sibling lingers
+    /// until idle eviction. Idempotent.
+    public func evict(sessionId: UUID) {
         guard let entry = entries[sessionId] else { return }
         entry.store.stop()
         entries.removeValue(forKey: sessionId)

@@ -3242,6 +3242,12 @@ public final class AgentControlServer {
         if let wiring = sessionWiring.removeValue(forKey: uuid) {
             wiring.stop()
         }
+        // v0.8 F3: drop the chat store from the registry now that the
+        // session is gone. Without this the store sticks around until
+        // the 60s sweep tick — small leak, but it also means a stale
+        // store can shadow a freshly-created session if uuids ever
+        // collide across a daemon restart. Idempotent.
+        chatStoreRegistry.evict(sessionId: uuid)
         registry.delete(id: uuid)
         AgentEventStream.recordEvent(sessionId: uuid, kind: .sessionDeleted, payload: [:])
         sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
