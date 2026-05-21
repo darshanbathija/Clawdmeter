@@ -1111,25 +1111,15 @@ public final class AgentControlServer {
         guard let paneId = session.tmuxPaneId ?? session.tmuxWindowId else {
             sendResponse(.internalError, on: connection); return
         }
-        // v0.8 QA: chat-mode CLI sessions (Claude / Codex CLI) also echo the
-        // user prompt into the daemon's SessionChatStore so the bubble shows
-        // up immediately. The CLI's own JSONL drives the assistant response
-        // rendering — but until that lands (and especially if the CLI process
-        // ignores stdin or hasn't written its first turn), the user otherwise
-        // sees a totally blank thread after pressing send.
-        if session.kind == .chat, let store = chatStoreRegistry.snapshotStore(for: session) {
-            let userMsgId = "user-\(Date().timeIntervalSince1970)-\(UUID().uuidString.prefix(8))"
-            store.appendSDKMessages([
-                ChatMessage(
-                    id: userMsgId,
-                    kind: .userText,
-                    title: "You",
-                    body: req.text,
-                    at: Date()
-                )
-            ], at: Date())
-            // D1 chat naming: tag the customName from the first user prompt
-            // when none is set yet (mirrors sendChatSDKPrompt).
+        // v0.8 QA: chat-mode CLI sessions don't need the user-prompt echo
+        // anymore — the rollout JSONL (Codex) / project JSONL (Claude)
+        // contains the user turn directly, so JSONLTail picks it up and
+        // appends to the store within ~1s. Echoing here AND parsing the
+        // JSONL caused the user bubble to render twice on multi-turn
+        // (two different message IDs → seen-IDs dedup missed both).
+        // We DO still rename the session (D1 first-prompt-becomes-title)
+        // and the snapshot's update-counter bumps via the JSONL parse.
+        if session.kind == .chat {
             if (session.customName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
                 let trimmed = req.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {

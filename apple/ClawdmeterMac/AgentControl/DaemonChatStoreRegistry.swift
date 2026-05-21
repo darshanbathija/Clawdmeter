@@ -128,6 +128,11 @@ public final class DaemonChatStoreRegistry {
         //   exist at session create, so createStore fell back to sdkOnly;
         //   we need to upgrade to a real JSONL-backed store once the file
         //   appears.
+        //
+        // CRITICAL: switch the file IN PLACE on the existing store
+        // (switchTailedFile) — don't construct a fresh store. A fresh
+        // store invalidates the Mac UI's @ObservedObject reference and
+        // the chat thread freezes on the previous turn's snapshot.
         if let entry = entries[session.id],
            session.kind == .chat {
             let desiredURL: URL?
@@ -139,17 +144,12 @@ public final class DaemonChatStoreRegistry {
                 desiredURL = nil
             }
             if let desired = desiredURL, entry.store.currentFileURL != desired {
-                entry.store.stop()
-                let fresh = SessionChatStore(sessionId: session.id, sessionFileURL: desired)
-                fresh.start()
-                let refreshed = Entry(
-                    store: fresh,
-                    subscriberCount: entry.subscriberCount,
-                    lastTouchedAt: Date()
-                )
+                entry.store.switchTailedFile(to: desired)
+                var refreshed = entry
+                refreshed.lastTouchedAt = Date()
                 entries[session.id] = refreshed
-                registryLogger.info("snapshot-cache refresh session=\(session.id.uuidString, privacy: .public) → \(desired.lastPathComponent, privacy: .public)")
-                return fresh
+                registryLogger.info("snapshot-cache file-swap session=\(session.id.uuidString, privacy: .public) → \(desired.lastPathComponent, privacy: .public)")
+                return entry.store
             }
         }
         if var entry = entries[session.id] {

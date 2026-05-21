@@ -217,7 +217,12 @@ public final class SessionChatStore: ObservableObject {
     }
 
     public let sessionId: UUID
-    private let sessionFileURL: URL
+    /// v0.8 QA: was `private let` — now `private var` so chat-mode Codex CLI
+    /// sessions can swap the tailed file when the CLI rotates its rollout
+    /// per turn. `switchTailedFile(to:)` re-aims the JSONLTail at the new
+    /// URL while keeping the SAME store identity, so the Mac UI's
+    /// @ObservedObject chain stays intact and snapshot updates flow.
+    private var sessionFileURL: URL
     private var tail: JSONLTail?
     /// Background parser actor — owns ChatItemBuilder, ingests typed
     /// `ParsedLine` values, never touches main. The 16ms commit task
@@ -252,6 +257,38 @@ public final class SessionChatStore: ObservableObject {
     /// DaemonChatStoreRegistry can detect rollout rotation in chat-mode
     /// Codex CLI sessions (Codex CLI writes a fresh rollout per turn).
     public var currentFileURL: URL { sessionFileURL }
+
+    /// v0.8 QA: re-aim the JSONLTail at a new file in place. Used when
+    /// Codex CLI rotates its rollout per turn — without this, the daemon
+    /// would have to create a NEW SessionChatStore which would
+    /// invalidate the Mac UI's @ObservedObject reference and freeze the
+    /// transcript on the previous turn. By keeping the same store
+    /// identity and just swapping the underlying file, the @Published
+    /// `snapshot` keeps streaming updates and the view re-renders.
+    /// Safe to call when the store is already tailing a different file;
+    /// no-op when called with the URL we're already tailing.
+    public func switchTailedFile(to newURL: URL) {
+        guard !sdkOnly else { return }
+        guard newURL != sessionFileURL else { return }
+        chatLogger.info("Switching tailed file for session \(self.sessionId.uuidString, privacy: .public): \(self.sessionFileURL.lastPathComponent, privacy: .public) → \(newURL.lastPathComponent, privacy: .public)")
+        // Stop the current tail + cancel in-flight ingest tasks. We
+        // explicitly DON'T reset the staging actor — the snapshot
+        // continues to accumulate items from both files, which matches
+        // user expectation (the chat thread shows the full session).
+        tail?.stop()
+        tail = nil
+        ingestTailTask?.cancel()
+        ingestTailTask = nil
+        for task in perLineIngestTasks { task.cancel() }
+        perLineIngestTasks.removeAll()
+        // Update URL and re-start the tail. parseGeneration bumps inside
+        // start(), so any stale per-line ingests that survive the cancel
+        // get dropped by the generation check.
+        sessionFileURL = newURL
+        commitTask?.cancel()
+        commitTask = nil
+        start()
+    }
 
     public init(sessionId: UUID, sessionFileURL: URL) {
         self.sessionId = sessionId
