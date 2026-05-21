@@ -113,6 +113,45 @@ public final class DaemonChatStoreRegistry {
     /// a burst of HTTP polls in a row reuses parsed state.
     public func snapshotStore(for session: AgentSession) -> SessionChatStore? {
         startSweepIfNeeded()
+        // v0.8 QA: for chat-mode Codex CLI, the rollout JSONL the store
+        // is tailing may be older than the CLI's current rollout. Codex
+        // CLI writes a NEW rollout per turn under ~/.codex/sessions/, so
+        // a session created at T0 picks up rollout-T0 at first cache,
+        // then when the user sends a prompt at T1 the CLI creates
+        // rollout-T1 and the daemon's store keeps tailing T0 — the new
+        // turn never reaches the snapshot. If we detect a newer rollout
+        // since the entry was opened, swap the store to the new file.
+        // v0.8 QA: chat-mode CLI sessions may need a JSONL swap on each
+        // snapshot read:
+        // - Codex CLI rotates rollouts per turn (~/.codex/sessions/...).
+        // - Claude CLI writes its JSONL on first turn — the file doesn't
+        //   exist at session create, so createStore fell back to sdkOnly;
+        //   we need to upgrade to a real JSONL-backed store once the file
+        //   appears.
+        if let entry = entries[session.id],
+           session.kind == .chat {
+            let desiredURL: URL?
+            if session.agent == .codex, session.codexChatBackend == .cli {
+                desiredURL = Self.newestCodexJSONL()
+            } else if session.agent == .claude {
+                desiredURL = Self.chatCwdClaudeJSONL(chatCwd: session.effectiveCwd)
+            } else {
+                desiredURL = nil
+            }
+            if let desired = desiredURL, entry.store.currentFileURL != desired {
+                entry.store.stop()
+                let fresh = SessionChatStore(sessionId: session.id, sessionFileURL: desired)
+                fresh.start()
+                let refreshed = Entry(
+                    store: fresh,
+                    subscriberCount: entry.subscriberCount,
+                    lastTouchedAt: Date()
+                )
+                entries[session.id] = refreshed
+                registryLogger.info("snapshot-cache refresh session=\(session.id.uuidString, privacy: .public) → \(desired.lastPathComponent, privacy: .public)")
+                return fresh
+            }
+        }
         if var entry = entries[session.id] {
             entry.lastTouchedAt = Date()
             entries[session.id] = entry

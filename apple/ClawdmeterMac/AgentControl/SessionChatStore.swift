@@ -236,6 +236,11 @@ public final class SessionChatStore: ObservableObject {
     /// transcript lives server-side, the SDK streams events.
     private let sdkOnly: Bool
 
+    /// v0.8 QA: expose the current JSONL file the store is tailing so
+    /// DaemonChatStoreRegistry can detect rollout rotation in chat-mode
+    /// Codex CLI sessions (Codex CLI writes a fresh rollout per turn).
+    public var currentFileURL: URL { sessionFileURL }
+
     public init(sessionId: UUID, sessionFileURL: URL) {
         self.sessionId = sessionId
         self.sessionFileURL = sessionFileURL

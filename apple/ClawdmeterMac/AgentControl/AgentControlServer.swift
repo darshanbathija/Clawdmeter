@@ -99,6 +99,12 @@ public final class AgentControlServer {
     /// Combine sink alive across the session lifetime.
     private var sdkChatIngestors: [UUID: CodexSDKEventIngestor] = [:]
 
+    /// v0.8 QA: per-session warmup task for chat-mode CLI sessions. The
+    /// handler that handles `POST /sessions/:id/send` awaits the task
+    /// before pasting so the first prompt doesn't race the trust-prompt
+    /// / update-prompt dismissal. Cleared once the task completes.
+    private var chatWarmupTasks: [UUID: Task<Void, Never>] = [:]
+
     /// v0.8 QA: same-process accessor so Mac UI's SessionsModel can read
     /// from the daemon's SessionChatStore (the one CodexSDKEventIngestor
     /// writes to) instead of creating its own empty parallel store. iOS
@@ -1115,12 +1121,50 @@ public final class AgentControlServer {
                 }
             }
         }
+        // v0.8 QA: for chat-mode CLI sessions, wait for the warmup task
+        // (trust prompt + update prompt dismissal) to finish before pasting
+        // the user's first prompt. Without this barrier, sends sent within
+        // ~3s of session creation race the dismissal — bytes land in the
+        // wrong screen and either trigger options (1/2/3) or are dropped.
+        if session.kind == .chat, let warmupTask = chatWarmupTasks[uuid] {
+            await warmupTask.value
+        }
         do {
             let data = Data(bytes)
-            if req.asFollowUp || bytes.count > 256 || req.text.contains("\n") {
+            // v0.8 QA: for chat-mode CLI sessions, clear the input line
+            // before pasting so multi-turn prompts don't concatenate with
+            // leftover text in the input box. C-u is a no-op when the
+            // input is empty, so the first prompt isn't affected.
+            if session.kind == .chat {
+                try await tmux.command(["send-keys", "-t", paneId, "C-u"])
+            }
+            // v0.8 QA: chat-mode CLI sessions must use pasteBytes (not
+            // sendKeys -l -H). tmux's hex-literal sendKeys sends each byte
+            // as a SEPARATE key event, which Codex CLI's TUI input
+            // ignores — bytes drop on the floor and the trailing Enter
+            // submits the placeholder text instead of the user's prompt.
+            // paste-buffer + paste-buffer lands the entire string atomically
+            // and the input widget treats it as a paste.
+            if session.kind == .chat
+                || req.asFollowUp
+                || bytes.count > 256
+                || req.text.contains("\n") {
                 try await tmux.pasteBytes(paneId: paneId, bytes: data)
             } else {
                 try await tmux.sendKeys(paneId: paneId, bytes: data)
+            }
+            // v0.8 QA: chat-mode CLI prompts need a trailing Enter so the
+            // CLI's input box actually submits. The Enter key event must
+            // be sent as a key name ("Enter" / "C-m") rather than a
+            // literal CR byte — TUI apps differentiate between the two
+            // (literal CR is text input, key Enter is a submit event).
+            // Brief delay before Enter lets the CLI's input widget
+            // settle after the paste — without it, Codex CLI's input
+            // sometimes sees the Enter before its render loop has
+            // committed the pasted text, dropping the submit on the floor.
+            if session.kind == .chat {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                try await tmux.command(["send-keys", "-t", paneId, "Enter"])
             }
             let peer = Self.endpointString(connection.endpoint)
             await AuditLog.shared.recordSend(sessionId: uuid, sourcePeer: peer, text: req.text)
@@ -2395,6 +2439,20 @@ public final class AgentControlServer {
                 tmuxPaneId: spawn.paneId,
                 mode: .local
             )
+            // v0.8 QA: dismiss Codex CLI's in-pane prompts (update, trust)
+            // and any Claude TUI welcome that swallows the first keystroke.
+            // Runs in the background so chat-session creation returns
+            // immediately — handleSendPrompt awaits the task before pasting
+            // so the user's first send doesn't race the dismissal.
+            let warmupSession = registry.session(id: session.id) ?? session
+            let warmupPane = spawn.paneId
+            let warmupTask = Task { [weak self] in
+                await self?.warmupChatPane(session: warmupSession, paneId: warmupPane)
+                await MainActor.run { [weak self] in
+                    self?.chatWarmupTasks[warmupSession.id] = nil
+                }
+            }
+            chatWarmupTasks[session.id] = warmupTask
         }
         AgentEventStream.recordEvent(
             sessionId: session.id, kind: .sessionCreated,
@@ -2589,6 +2647,65 @@ public final class AgentControlServer {
             sendResponse(.ok(contentType: "application/json", body: body), on: connection)
         } else {
             sendResponse(.ok(contentType: "application/json", body: Data("{}".utf8)), on: connection)
+        }
+    }
+
+    /// v0.8 QA: dismiss in-pane prompts that block the CLI from receiving
+    /// the user's first chat prompt. Covers Codex CLI's "Update available!"
+    /// prompt AND its "Do you trust the contents of this directory?" prompt
+    /// (which fires for chat-cwd paths since they're not git repos), plus
+    /// any Claude TUI welcome blurb that swallows the first keystroke.
+    /// Runs after the chat-session spawn returns to the caller, so HTTP
+    /// latency isn't bloated. Best-effort: probe + dismiss with retry, since
+    /// the trust prompt typically lands after the update prompt is cleared.
+    private func warmupChatPane(session: AgentSession, paneId: String) async {
+        guard session.kind == .chat else { return }
+        switch session.agent {
+        case .codex:
+            // Only the CLI backend uses tmux. SDK is dispatched elsewhere.
+            guard session.codexChatBackend == .cli else { return }
+            // Loop a few times: each cycle waits for the screen to render,
+            // captures it, and dismisses the recognized prompt. Multiple
+            // prompts can show in sequence (update screen → trust screen).
+            for cycle in 0..<4 {
+                try? await Task.sleep(nanoseconds: cycle == 0 ? 1_500_000_000 : 800_000_000)
+                let captured = (try? await tmux.command(["capture-pane", "-p", "-t", paneId]))?.lines.joined(separator: "\n") ?? ""
+                if captured.contains("Update available") {
+                    // Options: 1 update, 2 skip, 3 skip until next version.
+                    // Send "2\r" to skip just this version.
+                    serverLogger.info("chat warmup: dismissing Codex update prompt for \(session.id.uuidString, privacy: .public)")
+                    try? await tmux.sendKeys(paneId: paneId, bytes: Data([0x32, 0x0d]))
+                    continue
+                }
+                if captured.contains("Do you trust the contents") {
+                    // The trust dialog ignores a bare Enter — the dialog
+                    // doesn't wire its input handler until the user touches
+                    // a navigation key first. Send Down + Up + Enter so we
+                    // refresh the selection (back to "1. Yes, continue")
+                    // and then commit. Verified by manual repro in tmux.
+                    serverLogger.info("chat warmup: dismissing Codex trust prompt for \(session.id.uuidString, privacy: .public)")
+                    try? await tmux.command(["send-keys", "-t", paneId, "Down", "Up", "Enter"])
+                    continue
+                }
+                // No known blocking prompt visible — done.
+                break
+            }
+            // After dismissal, Codex CLI needs ~3s to render its main TUI,
+            // load MCP servers, and wire up the input handler. Sending the
+            // user's first prompt too soon causes the paste to be dropped
+            // and the bare Enter to submit whatever placeholder text is
+            // showing — manifested in the rollout as user messages like
+            // "Summarize recent commits" instead of the actual prompt.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+        case .claude:
+            // Claude TUI shows "Welcome back" briefly with a tips card,
+            // then auto-renders the input box (❯). A single probe is
+            // enough — the capture gives the TUI ~1.5s to settle.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            _ = try? await tmux.command(["capture-pane", "-p", "-t", paneId])
+        case .gemini:
+            // v0.9 path. Nothing to do today.
+            break
         }
     }
 
